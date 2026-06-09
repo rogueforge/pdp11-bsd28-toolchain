@@ -1036,11 +1036,12 @@ getblk(size)
 		size = sizeof(struct tnode);
 	p = curbase;
 	if ((curbase += size) >= coremax) {
-		if (sbrk(1024) == -1) {
-			error("Out of space-- c1");
-			exit(1);
-		}
-		coremax += 1024;
+		/* Grow the node arena.  The PDP-11 grew it with raw sbrk(), but
+		 * on the host that collides with libc malloc (which c1 itself
+		 * uses via stdio) and corrupts the heap, so the arena is a malloc
+		 * region instead (see main()); a chunk that won't fit is fatal. */
+		error("Out of space-- c1");
+		exit(1);
 	}
 	/* zero the block: curbase is reset per function, so memory gets
 	 * reused; the PDP-11 relied on fresh (zero) sbrk pages, but reused

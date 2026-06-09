@@ -22,10 +22,10 @@ char	notrel[] = {	NEQUAL, EQUAL, GREAT, GREATEQ, LESS,
 			LESSEQ, GREATP, GREATQP, LESSP, LESSEQP
 };
 
-struct tconst czero = { CON, INT, 0};
-struct tconst cone = { CON, INT, 1};
+struct tnode czero = { CON, INT, 0};
+struct tnode cone = { CON, INT, 1};
 
-struct tname sfuncr = { NAME, STRUCT, STATIC, 0, 0, 0 };
+struct tnode sfuncr = { NAME, STRUCT };  /* full tnode; fields set below */
 
 struct	table	*cregtab;
 
@@ -52,7 +52,14 @@ char *argv[];
 	if (argc > 4)
 		ovlyflag++;
 #endif MENLO_OVLY
-	funcbase = curbase = coremax = sbrk(0);
+	sfuncr.class = STATIC;
+	/* Node arena: a malloc region (not raw sbrk, which would corrupt the
+	 * host libc heap that c1's own stdio uses).  Reset per function via
+	 * curbase=funcbase, so it only needs to hold one function's tree.
+	 * The PDP-11 had ~56KB total; 16MB is comfortably beyond any input. */
+	funcbase = curbase = malloc(16*1024*1024);
+	coremax = funcbase + 16*1024*1024;
+	if (funcbase == 0) { error("No memory for node arena"); exit(1); }
 	getree();
 	/*
 	 * If any floating-point instructions

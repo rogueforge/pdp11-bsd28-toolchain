@@ -105,7 +105,12 @@ char *argv[];
 			i += *sp++;
 		hshtab[i%HSHSIZ].hflag = FKEYW;
 	}
-	coremax = funcbase = curbase = sbrk(0);
+	/* Node arena: a malloc region, not raw sbrk -- on the host sbrk
+	 * collides with the libc malloc that c0's own stdio uses and corrupts
+	 * the heap.  Reset per function via funcbase=curbase. */
+	funcbase = curbase = malloc(16*1024*1024);
+	coremax = funcbase + 16*1024*1024;
+	if (funcbase == 0) { error("No memory for node arena"); exit(1); }
 	while(!eof)
 		extdef();
 	outcode("B", EOFC);

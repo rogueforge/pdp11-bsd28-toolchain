@@ -35,10 +35,18 @@ all: tools libc sim
 dirs:
 	mkdir -p ${BIN} ${LIB} ${INC}
 
+# Target (PDP-11) system headers, installed to usr/include where cpp's
+# getincdir() finds them (resolved relative to the cpp binary, the same
+# scheme cc/ld use) -- mirrors the vax project's `headers' target.
+STD_HDRS = stdio.h
+
+headers: dirs
+	for f in ${STD_HDRS}; do cp include/$$f ${INC}/$$f; done
+
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool ar-tool ranlib-tool cc-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool ar-tool ranlib-tool cc-tool headers
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)

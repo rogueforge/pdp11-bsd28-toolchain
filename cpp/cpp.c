@@ -3,6 +3,8 @@ static	char	sccsid[] = "@(#)cpp.c	2.2";	/*	SCCS id keyword	*/
 # define UCB_PATH
 
 # include <stdio.h>
+# include <unistd.h>
+# include <string.h>
 
 /* C command
 /* written by John F. Reiser
@@ -969,6 +971,42 @@ strdex(s,c) char *s,c; {
 
 yywrap(){ return(1); }
 
+/*
+ * Compute the default system include directory relative to the cpp binary,
+ * like the vax project's cpp (and cc/ld's setup_tools).  If argv[0] is
+ * ".../usr/bin/<prefix>cpp", return ".../usr/include".  This replaces the
+ * authentic UCB_PATH $PATH search, which assumes an installed /usr tree.
+ */
+STATIC char incdir[256];
+STATIC char cppself[1024];
+
+char *
+getincdir(av0)
+	char *av0;
+{
+	char *p, *last;
+	int len;
+
+	if (strchr(av0, '/') == 0) {		/* bare name: use /proc/self/exe */
+		int n = readlink("/proc/self/exe", cppself, sizeof cppself - 1);
+		if (n > 0) { cppself[n] = '\0'; av0 = cppself; }
+	}
+	for (last=0, p=av0; *p; p++)
+		if (*p=='/') last=p;
+	if (last==0 || last-av0 < 4)
+		return 0;
+	/* the directory before the final component must be "bin" */
+	if (last[-3]=='b' && last[-2]=='i' && last[-1]=='n' && last[0]=='/') {
+		len = last - 3 - av0 - 1;	/* up through the slash before bin */
+		if (len <= 0 || len+8 >= sizeof incdir)
+			return 0;
+		strncpy(incdir, av0, len+1);
+		strcpy(incdir+len+1, "include");
+		return incdir;
+	}
+	return 0;
+}
+
 main(argc,argv)
 	char *argv[];
 {
@@ -1095,6 +1133,10 @@ main(argc,argv)
 	exfail = 0;
 		/* after user -I files here are the standard include libraries */
 # if unix
+	/* default system include dir, resolved relative to the cpp binary
+	 * (.../usr/bin/<p>-cpp -> .../usr/include), like the vax project */
+	{ char *ic = getincdir(argv[0]); if (ic) dirs[nd++] = ic; }
+	dirs[nd++] = "include";		/* build-tree headers (pre-install) */
 #ifndef UCB_PATH
 	dirs[nd++] = "/usr/include";
 #endif

@@ -152,12 +152,12 @@ extern int	opdope[];
 extern char	*opntab[];
 int	nstack;
 int	nfloat;
-struct	tname	sfuncr;
+struct	tnode	sfuncr;
 char	*funcbase;
 char	*curbase;
 char	*coremax;
-struct tconst czero, cone;
-struct	ftconst	fczero;
+struct tnode czero, cone;	/* full tnode: undersized tconst overran when read as a node */
+struct	tnode	fczero;	/* full tnode (was undersized ftconst) */
 long	totspace;
 #ifdef MENLO_OVLY
 int	ovlyflag;

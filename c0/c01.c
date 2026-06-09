@@ -34,7 +34,8 @@ build(op)
 	dope = opdope[op];
 	if ((dope&BINARY)!=0) {
 		p2 = chkfun(disarray(*--cp));
-		t2 = p2->type;
+		t2 = p2 ? p2->type : 0;		/* p2 is NULL for a no-arg call's
+						 * empty arglist (t2 unused there) */
 	}
 	p1 = *--cp;
 	/*
@@ -309,6 +310,10 @@ struct tnode *ap;
 	register struct tnode *p;
 	register int t;
 
+	if (ap == 0)		/* empty arglist of a no-arg call g(): NULL flows
+				 * through here.  Benign on the PDP-11 (address 0
+				 * reads as 0), a segfault on the host. */
+		return(0);
 	p = ap;
 	if (((t = p->type)&XTYPE)==FUNC && p->op!=ETYPE)
 		return(block(AMPER,incref(t),p->subsp,p->strp,p));
@@ -326,6 +331,8 @@ struct tnode *ap;
 	register int t;
 	register struct tnode *p;
 
+	if (ap == 0)		/* NULL (empty arglist) -- see chkfun above */
+		return(0);
 	p = ap;
 	/* check array & not MOS and not typer */
 	if (((t = p->type)&XTYPE)!=ARRAY || p->op==NAME&&((struct hshtab *)p->tr1)->hclass==MOS
@@ -484,10 +491,10 @@ gblock(n)
 		n = sizeof(struct tnode);
 	p = curbase;
 	if ((curbase += n) >= coremax) {
-		if (sbrk(1024) == -1) {
-			error("Out of space");
-			exit(1);
-		}
+		/* arena is a fixed malloc region now (see main); raw sbrk would
+		 * corrupt the host heap c0's stdio uses */
+		error("Out of space");
+		exit(1);
 		coremax += 1024;
 	}
 	{ register char *q; for (q = p; q < curbase; q++) *q = 0; }
