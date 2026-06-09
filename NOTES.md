@@ -63,6 +63,13 @@ source.c -> cpp -> c0 -> c1 -> [c2] -> as -> source.o -> ld -> a.out
    binary. `cvopt.c` (C) converts the template form to assembly. For a host
    build the table must become host-buildable data/object.
 
+## Per-tool porting guides
+
+`docs/` has a porting guide for each tool, written as it is ported:
+`docs/README.md` (index + the shared porting checklist), then
+`cross-headers.md`, `binutils.md`, `cpp.md`, `c0.md`, `c1.md`. New guides
+are added for `c2`, `as`, `ld`, and `cc` as those land.
+
 ## Testing
 
 `make test` runs `tests/run.sh`, a small regression harness:
