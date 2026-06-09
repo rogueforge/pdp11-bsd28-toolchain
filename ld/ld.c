@@ -22,6 +22,7 @@ char	*sccsid = "@(#)ld.c	2.6 ld";
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdint.h>
 
 
 /*	Layout of a.out file :
@@ -101,7 +102,7 @@ struct page {
 	int	nuser;
 	int	bno;
 	int	nibuf;
-	int	buff[256];
+	uint16_t	buff[256];	/* on-disk words: 512 bytes = 256 words */
 } page[2];
 
 struct {
@@ -110,7 +111,7 @@ struct {
 } fpage;
 
 struct stream {
-	int	*ptr;
+	uint16_t	*ptr;
 	int	bno;
 	int	nibuf;
 	int	size;
@@ -122,22 +123,22 @@ struct stream reloc;
 
 struct {
 	char	aname[14];
-	long	atime;
+	int32_t	atime;
 	char	auid, agid;
-	int	amode;
-	long	asize;
-} archdr;
+	int16_t	amode;
+	int32_t	asize;
+} __attribute__((packed)) archdr;		/* V7 ar header, 26 bytes = 13 words */
 
 struct {
-	int	fmagic;
-	int	tsize;
-	int	dsize;
-	int	bsize;
-	int	ssize;
-	int	entry;
-	int	pad;
-	int	relflg;
-} filhdr;
+	uint16_t	fmagic;
+	uint16_t	tsize;
+	uint16_t	dsize;
+	uint16_t	bsize;
+	uint16_t	ssize;
+	uint16_t	entry;
+	uint16_t	pad;
+	uint16_t	relflg;
+} filhdr;					/* 8 words = 16 bytes */
 
 
 /* one entry for each archive member referenced;
@@ -160,7 +161,7 @@ struct symbol {
 #else MENLO_OVLY
 	char	sovly;
 #endif MENLO_OVLY
-	int	svalue;
+	uint16_t	svalue;		/* on-disk 16-bit value; sizeof symbol==12 */
 #ifdef MENLO_OVLY
 	int	sovalue;
 #endif MENLO_OVLY
@@ -230,15 +231,15 @@ int	cbrel;
 
 int	errlev;
 int	delarg	= 4;
-char	tfname[] = "/tmp/ldaXXXXX";
+char	tfname[] = "/tmp/ldaXXXXXX";	/* glibc mktemp(3) needs 6 trailing X */
 
 
 /* output management */
 struct buf {
 	int	fildes;
 	int	nleft;
-	int	*xnext;
-	int	iobuf[256];
+	uint16_t	*xnext;
+	uint16_t	iobuf[256];	/* on-disk words */
 };
 struct buf	toutb;
 struct buf	doutb;
@@ -638,7 +639,7 @@ long nloc;
 		libp++;
 		return(0);
 	}
-	mget((int *)&archdr, sizeof archdr);
+	mget((uint16_t *)&archdr, sizeof archdr);
 	if (load1(1, nloc + (sizeof archdr) / 2)) {
 		libp->loc = nloc;
 		libp++;
@@ -705,7 +706,7 @@ long loc;
 	loc += (sizeof filhdr)/2 + filhdr.tsize + filhdr.dsize;
 	dseek(&text, loc, filhdr.ssize);
 	while (text.size > 0) {
-		mget((int *)&cursym, sizeof cursym);
+		mget((uint16_t *)&cursym, sizeof cursym);
 		type = cursym.stype;
 		if (Sflag) {
 			mtype = type&037;
@@ -979,7 +980,7 @@ setupout()
 		filhdr.entry=0;
 	filhdr.pad = 0;
 	filhdr.relflg = (rflag==0);
-	mput(&toutb, (int *)&filhdr, sizeof filhdr);
+	mput(&toutb, (uint16_t *)&filhdr, sizeof filhdr);
 #ifdef MENLO_OVLY
 /* wnj added */
 	if (numov) {
@@ -1003,7 +1004,7 @@ struct buf *buf;
 	buf->fildes = open(nam, 2);
 	if (tempflg)
 		unlink(tfname);
-	buf->nleft = sizeof(buf->iobuf)/sizeof(int);
+	buf->nleft = sizeof(buf->iobuf)/sizeof(*buf->iobuf);
 	buf->xnext = buf->iobuf;
 }
 
@@ -1023,7 +1024,7 @@ char *acp;
 	} else {	/* scan archive members referenced */
 		for (lp = libp; lp->loc != -1; lp++) {
 			dseek(&text, lp->loc, sizeof archdr);
-			mget((int *)&archdr, sizeof archdr);
+			mget((uint16_t *)&archdr, sizeof archdr);
 			mkfsym(archdr.aname);
 			load2(lp->loc + (sizeof archdr) / 2);
 		}
@@ -1054,7 +1055,7 @@ long loc;
 	dseek(&text, loc + filhdr.tsize + filhdr.dsize, filhdr.ssize);
 	while (text.size > 0) {
 		symno++;
-		mget((int *)&cursym, sizeof cursym);
+		mget((uint16_t *)&cursym, sizeof cursym);
 #ifdef MENLO_OVLY
 		if (inov && cursym.sname[0] == 'c') {
 			if (!strcmp(cursym.sname, "csv"))
@@ -1071,7 +1072,7 @@ long loc;
 		}
 		if ((type&EXTERN) == 0) {
 			if (!sflag&&!xflag&&(!Xflag||cursym.sname[0]!='L'))
-				mput(&soutb, (int *)&cursym, sizeof cursym);
+				mput(&soutb, (uint16_t *)&cursym, sizeof cursym);
 			continue;
 		}
 		if ((sp = *lookup()) == 0)
@@ -1196,7 +1197,8 @@ struct buf *b1, *b2;
 
 finishout()
 {
-	register n, *p;
+	register int n;
+	register uint16_t *p;
 #ifdef MENLO_OVLY
 	register struct symbol *sp, *symp;
 #endif MENLO_OVLY
@@ -1254,7 +1256,7 @@ finishout()
 		if (xflag==0)
 			copy(&soutb);
 #ifndef MENLO_OVLY
-		for (p = (int *)symtab; p < (int *)&symtab[symindex];)
+		for (p = (uint16_t *)symtab; p < (uint16_t *)&symtab[symindex];)
 			putw(*p++, &toutb);
 #else MENLO_OVLY
 		for (p = (int *)symtab; p < (int *)&symtab[symindex];) {
@@ -1301,7 +1303,8 @@ adrof(s)
 copy(buf)
 struct buf *buf;
 {
-	register f, *p, n;
+	register int f, n;
+	register uint16_t *p;
 
 	flush(buf);
 	lseek(f = buf->fildes, (long)0, 0);
@@ -1312,9 +1315,9 @@ struct buf *buf;
 #endif MENLO_OVLY
 		n >>= 1;
 #ifndef MENLO_OVLY
-		p = (int *)doutb.iobuf;
+		p = (uint16_t *)doutb.iobuf;
 #else MENLO_OVLY
-		p = (int *)buf->iobuf;
+		p = (uint16_t *)buf->iobuf;
 #endif MENLO_OVLY
 		do
 			putw(*p++, &toutb);
@@ -1332,14 +1335,15 @@ char *s;
 	cp8c(s, cursym.sname);
 	cursym.stype = 037;
 	cursym.svalue = torigin;
-	mput(&soutb, (int *)&cursym, sizeof cursym);
+	mput(&soutb, (uint16_t *)&cursym, sizeof cursym);
 }
 
 mget(aloc, an)
-int *aloc;
+uint16_t *aloc;
 {
-	register *loc, n;
-	register *p;
+	register uint16_t *loc;
+	register int n;
+	register uint16_t *p;
 
 	n = an;
 	n >>= 1;
@@ -1363,11 +1367,11 @@ int *aloc;
 }
 
 mput(buf, aloc, an)
-struct buf *buf; 
-int *aloc;
+struct buf *buf;
+uint16_t *aloc;
 {
-	register *loc;
-	register n;
+	register uint16_t *loc;
+	register int n;
 
 	loc = aloc;
 	n = an>>1;
@@ -1471,7 +1475,7 @@ char *acp;
 	dseek(&text, 1L, sizeof archdr);	/* word addressing */
 	if(text.size <= 0)
 		return(1);	/* regular archive */
-	mget((int *)&archdr, sizeof archdr);
+	mget((uint16_t *)&archdr, sizeof archdr);
 	if(strncmp(archdr.aname, goodnm, 14) != 0)
 		return(1);	/* regular archive */
 	else {
@@ -1612,7 +1616,7 @@ long loc;
 	register st, sd;
 
 	dseek(&text, loc, sizeof filhdr);
-	mget((int *)&filhdr, sizeof filhdr);
+	mget((uint16_t *)&filhdr, sizeof filhdr);
 	if (filhdr.fmagic != FMAGIC)
 		error(2, "Bad format");
 	st = (filhdr.tsize+01) & ~01;
@@ -1663,5 +1667,5 @@ register struct buf *b;
 		if (write(b->fildes, (char *)b->iobuf, n) != n)
 			error(2, "output error");
 	b->xnext = b->iobuf;
-	b->nleft = sizeof(b->iobuf)/sizeof(int);
+	b->nleft = sizeof(b->iobuf)/sizeof(*b->iobuf);
 }

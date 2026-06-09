@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool cc-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool cc-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -177,6 +177,19 @@ ${BIN}/${PREFIX}-as: as/as.c as/optab.h
 	${HOSTCC} ${O} ${COMPAT} -Ias -o $@ as/as.c
 
 # ---------------------------------------------------------------------
+# ld -- link editor.  The authentic 2.8BSD ld.c, ported for LP64: its
+# whole I/O model assumes sizeof(int)==2, so on-disk word buffers and the
+# header/symbol/archive structs are pinned to 16-bit widths (uint16_t).
+# Links classic 2.8BSD a.out objects (what as emits).  Uses openlp for
+# -l libraries, so it links the libucbpath objects like cpp.
+# ---------------------------------------------------------------------
+
+ld-tool: ${BIN}/${PREFIX}-ld
+
+${BIN}/${PREFIX}-ld: ld/ld.c ${UCB_OBJS}
+	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ ld/ld.c ${UCB_OBJS}
+
+# ---------------------------------------------------------------------
 # cc -- compiler driver.
 # ---------------------------------------------------------------------
 
@@ -207,4 +220,5 @@ clean:
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
-	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-as ${BIN}/${PREFIX}-cc
+	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-as \
+	      ${BIN}/${PREFIX}-ld ${BIN}/${PREFIX}-cc

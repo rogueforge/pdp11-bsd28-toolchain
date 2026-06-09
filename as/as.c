@@ -208,6 +208,13 @@ void ensure(seg,n) { if(dot[seg]+n>segcap[seg]){ int nc=(segcap[seg]?segcap[seg]
 /* relocation kind for a value's segment */
 int relkind(seg){ switch(seg){case STEXT:return RTEXT;case SDATA:return RDATA;case SBSS:return RBSS;default:return RABS;} }
 
+/* Within an object the address space is unified: text@0, data@txtsize,
+ * bss@txtsize+datsize (the authentic as's datbase/bssbase, as21.s).  Symbol
+ * values and internal references are emitted in this unified space; ld's
+ * cdrel/cbrel back out the bias when combining objects.  Set after pass 1. */
+int txtsize, datsize;
+int segbase(seg){ switch(seg){case SDATA:return txtsize;case SBSS:return txtsize+datsize;default:return 0;} }
+
 void emitword(w, seg, sym, pcrel)
 struct sym *sym;
 {
@@ -223,17 +230,16 @@ struct sym *sym;
 }
 void emitbyte(b){ int s=curseg; if(pass==2){ ensure(s,1); segbuf[s][dot[s]]=b&0377; relbuf[s][dot[s]]=0; } dot[s]++; }
 
-/* emit an instruction's extra (offset) word from an operand */
+/* emit an instruction's extra (offset) word from an operand.  Defined
+ * data/bss targets are biased into the unified object address space; the
+ * current location (for pc-relative) is biased by the current segment. */
 void emitextra(xval,xseg,xsym,pcrel)
 struct sym *xsym;
 {
-	long v=xval;
+	long v = xval + segbase(xseg);
 	if(pcrel){
-		/* X(pc): value is target; stored = target - (addr_of_next_word) */
-		if(xseg==(curseg+1) || (xseg!=SEXT && xseg!=SABS)) {
-			/* same-ish relocation: pc-relative within object */
-		}
-		v = xval - (dot[curseg]+2);
+		/* X(pc): stored = target - (address of the word after this one) */
+		v = v - (dot[curseg] + segbase(curseg+1) + 2);
 		emitword(v & 0177777, (xseg==SABS?SABS:xseg), xsym, 1);
 	} else {
 		emitword(v & 0177777, xseg, xsym, 0);
@@ -335,7 +341,7 @@ void doglobl(){ for(;;){ if(peek()!=TID) return;	/* bare .globl is a no-op separ
 void docomm(){ struct sym*sp; int seg; long sz; if(lex()!=TID){aerror(".comm name");return;} sp=lookup(tokname);
 	if(lex()!=',')aerror(".comm ,"); sz=expr(&seg); sp->flags|=SF_GLOBL; if(!(sp->flags&SF_DEF)){sp->value=sz;} }
 void even(){ if(dot[curseg]&1){ emitbyte(0);} }
-void doword(long v,int seg,struct sym*sym){ emitword(v&0177777,seg,sym,0); }
+void doword(long v,int seg,struct sym*sym){ emitword((v+segbase(seg))&0177777,seg,sym,0); }
 
 void assemble()
 {
@@ -415,7 +421,10 @@ void putw_(FILE*f,int w){ putc(w&0377,f); putc((w>>8)&0377,f); }
 void writeout()
 {
 	FILE *f; struct sym *sp; int i, nsym=0, ssize;
-	int tsize=dot[0], dsize=dot[1], bsize=dot[2];
+	/* segments are even-sized in the file (data must start at txtsize); the
+	 * pad bytes are already zero (segbuf/relbuf are zeroed on growth) */
+	int tsize=(dot[0]+1)&~1, dsize=(dot[1]+1)&~1, bsize=(dot[2]+1)&~1;
+	ensure(0,2); ensure(1,2);
 	/* assign symbol indices: globals + defined locals (skip undefined-but-unreferenced) */
 	int idx=0;
 	for(i=0;i<NHASH;i++) for(sp=htab[i];sp;sp=sp->next){
@@ -437,10 +446,15 @@ void writeout()
 		if(sp->flags&SF_DEF){ switch(sp->seg){case STEXT:nt=N_TEXT;break;case SDATA:nt=N_DATA;break;
 			case SBSS:nt=N_BSS;break;default:nt=N_ABS;} }
 		else nt=N_UNDF;
-		if(sp->flags&SF_GLOBL) nt|=N_EXT;
+		/* An undefined symbol that is referenced is an external reference
+		 * (the ld here resolves only EXTERN+UNDEF via REXT relocations); so
+		 * mark it external even without an explicit .globl. */
+		if((sp->flags&SF_GLOBL) || !(sp->flags&SF_DEF)) nt|=N_EXT;
 		fwrite(sp->name,1,8,f);
 		putc(nt,f); putc(0,f);
-		putw_(f, sp->value);
+		/* emit the value in the unified object address space (data biased
+		 * by txtsize, bss by txtsize+datsize), like the authentic as */
+		putw_(f, (sp->value + segbase(sp->seg)) & 0177777);
 	}
 	fclose(f);
 }
@@ -466,6 +480,19 @@ char**argv;
 	/* pass 1: assign addresses */
 	pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0;
 	assemble();
+	/* segment sizes are now known (even-rounded, as ld rounds them); the
+	 * data/bss base used to bias values in the unified object space */
+	txtsize = (dot[0]+1) & ~1;
+	datsize = (dot[1]+1) & ~1;
+	/* assign symbol-table indices now, BEFORE pass 2 emits relocation
+	 * words: emitword() stamps sym->index into the external relocation
+	 * word, so the index must already match the symbol's position in the
+	 * symbol table writeout() emits (same iteration order/predicate). */
+	{ int h; struct sym *sp; int idx=0;
+	  for(h=0;h<NHASH;h++) for(sp=htab[h];sp;sp=sp->next)
+		if((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT)
+			sp->index=idx++;
+	}
 	/* pass 2: emit */
 	pass=2; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0;
 	assemble();

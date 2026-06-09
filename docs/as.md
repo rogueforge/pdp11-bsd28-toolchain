@@ -80,3 +80,17 @@ ${BIN}/${PREFIX}-as: as/as.c as/optab.h
   a literal `mov\0` in the assembly; the original as skipped it.  The lexer
   now treats an embedded NUL as whitespace and detects real end-of-input by
   buffer length, not the first NUL.
+
+## Update: data/bss symbol biasing (found when ld was added)
+
+Classic a.out uses a unified per-object address space: text@0, data@txtsize,
+bss@txtsize+datsize (the authentic as's `datbase`/`bssbase`, as21.s).  So a
+data symbol's value, and any internal reference to a data/bss symbol, must be
+emitted biased by the preceding segments' sizes; ld's `cdrel`/`cbrel` back
+the bias out when combining objects (a stored value of `txtsize+offset`
+relocates to `offset+dorigin`).  `as` now applies this bias in the symbol
+table, `doword`, and `emitextra` (including the pc-relative current-location
+bias).  Without it, every data/bss symbol linked to the wrong address.
+Also: the external relocation symbol index is assigned between pass 1 and
+pass 2 (pass 2 stamps it into REXT words), and undefined-but-referenced
+symbols are written `N_EXT|N_UNDF` so ld resolves them.
