@@ -1,0 +1,13 @@
+This cpp has the property that <..> include files are searched for
+according to the PATH in your environment.  (For example, if your
+PATH is :/usr/new/bin:/usr/ucb/bin:/bin:/usr/bin, it will search
+in include, /usr/new/include, /usr/ucb/include, /include, and /usr/include.)
+
+After running with it like this for some months, we at Berkeley
+generally regard this as a mistake.  The include files found should
+depend on where the sources are, not the path of whoever happens
+to be compiling a program.
+
+However, this is included mainly just in case you are having problems
+and want to isolate the ucb kernel and stuff in a separate place.
+Please don't install it as the standard cpp.
