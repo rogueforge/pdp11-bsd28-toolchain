@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool cc-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -158,6 +158,18 @@ ${BIN}/${PREFIX}-c2: c2/c20.o c2/c21.o
 c2/c20.o: c2/c20.c c2/c2.h; ${HOSTCC} ${C2FLAGS} -c -o $@ c2/c20.c
 c2/c21.o: c2/c21.c c2/c2.h; ${HOSTCC} ${C2FLAGS} -c -o $@ c2/c21.c
 
+# ---------------------------------------------------------------------
+# cc -- compiler driver.  Resolves the passes relative to its own install
+# location and runs cpp -> c0 -> c1 (-> c2 only with -O, experimental) ->
+# as -> ld.  -S stops after c1 and writes assembly; -c/-o need as/ld (not
+# yet ported), so those report the missing tool.
+# ---------------------------------------------------------------------
+
+cc-tool: ${BIN}/${PREFIX}-cc
+
+${BIN}/${PREFIX}-cc: cc/cc.c
+	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ cc/cc.c
+
 # =====================================================================
 # Tests
 # =====================================================================
@@ -180,4 +192,4 @@ clean:
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
-	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2
+	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-cc

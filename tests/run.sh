@@ -87,7 +87,7 @@ run_cpp_tests() {
 
 # ---- shell tests (binutils, and future passes) ------------------------
 run_sh_tests() {
-	for dir in binutils c0 c1 c2 as ld; do
+	for dir in binutils c0 c1 c2 cc as ld; do
 		for t in "$ROOT"/tests/$dir/*.sh; do
 			[ -e "$t" ] || continue
 			name="$dir/`basename \"$t\" .sh`"

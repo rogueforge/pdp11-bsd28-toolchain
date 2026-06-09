@@ -5,6 +5,11 @@ static	char	sccsid[] = "@(#)cc.c	2.6";	/*	SCCS id keyword	*/
 # include <signal.h>
 # include <whoami.h>
 
+/* declared here, not via <string.h>/<unistd.h>, which clash with cc's own
+ * exec* wrappers; the pointer returns must be declared so LP64 does not
+ * truncate them */
+char	*strchr(), *strstr(), *strncpy();
+
 /* cc command */
 
 # define UCB_UQTEMP
@@ -45,14 +50,62 @@ int	ovlyflag;
 int	noflflag;
 char	*chpass ;
 char	*npassname ;
-char	pass0[20] = "../lib/c0";
-char	pass1[20] = "../lib/c1";
-char	pass2[20] = "../lib/c2";
-char	passp[20] = "../lib/cpp";
+char	pass0[1024] = "../lib/c0";
+char	pass1[1024] = "../lib/c1";
+char	pass2[1024] = "../lib/c2";
+char	passp[1024] = "../lib/cpp";
+char	asname[1024] = "as";	/* resolved by setup_tools() */
+char	ldname[1024] = "ld";	/* resolved by setup_tools() */
+char	prefbuf[1024];
 char	*pref = "/lib/crt0.o";
 char	*copy();
 char	*setsuf();
 char	*strcat();
+
+/*
+ * Resolve the compiler-pass binaries relative to this cc's own location,
+ * so the toolchain is relocatable.  If cc is .../usr/bin/<prefix>-cc, the
+ * passes are .../usr/bin/<prefix>-{cpp,c0,c1,c2,as,ld} and crt0.o is in
+ * .../usr/lib/.  Mirrors the VAX project's scheme.
+ */
+setup_tools(av0)
+char *av0;
+{
+	static char self[1024], base[1024], prefix[64];
+	char *p, *last, *name, *dash, *bin;
+
+	if (strchr(av0, '/') == 0) {		/* bare name: use /proc/self/exe */
+		int n = readlink("/proc/self/exe", self, sizeof self - 1);
+		if (n > 0) { self[n] = 0; av0 = self; }
+	}
+	for (last = 0, p = av0; *p; p++)
+		if (*p == '/') last = p;
+	if (last == 0)
+		return;				/* keep the default paths */
+	name = last + 1;
+	/* base = everything up to and including the final "/" */
+	{ int len = name - av0; strncpy(base, av0, len); base[len] = 0; }
+	/* prefix = cc's name up to and including the last '-' */
+	prefix[0] = 0;
+	for (dash = 0, p = name; *p; p++)
+		if (*p == '-') dash = p;
+	if (dash) { int n = dash - name + 1; strncpy(prefix, name, n); prefix[n] = 0; }
+
+	bin = base;				/* passes live alongside cc */
+	sprintf(passp, "%s%scpp", bin, prefix);
+	sprintf(pass0, "%s%sc0", bin, prefix);
+	sprintf(pass1, "%s%sc1", bin, prefix);
+	sprintf(pass2, "%s%sc2", bin, prefix);
+	sprintf(asname, "%s%sas", bin, prefix);
+	sprintf(ldname, "%s%sld", bin, prefix);
+	/* crt0.o is under .../usr/lib if cc is under .../usr/bin */
+	if ((last = strstr(base, "bin/")) != 0) {
+		int len = last - base;
+		strncpy(prefbuf, base, len);
+		strcpy(prefbuf + len, "lib/crt0.o");
+		pref = prefbuf;
+	}
+}
 char	*strcpy();
 
 main(argc, argv)
@@ -66,6 +119,7 @@ char *argv[];
 	int idexit();
 
 	i = nc = nl = f20 = nxo = 0;
+	setup_tools(argv[0]);
 	setbuf(stdout, (char *)NULL);
 	pv = ptemp;
 	while(++i < argc) {
@@ -206,11 +260,11 @@ passa:
 		goto nocom;
 	if (pflag==0) {
 # ifdef UCB_UQTEMP
-		char FD;
+		int FD;		/* a file descriptor, not a char */
 
-		tmp0 = copy("/tmp/ctm0XXXXX");
+		tmp0 = copy("/tmp/ctm0XXXXXX");
 		mktemp (tmp0);
-		FD = creat (tmp0);
+		FD = creat (tmp0, 0600);
 		if (FD < 0)
 		{
 			error("cc: cannot create temp", NULL);
@@ -258,6 +312,9 @@ passa:
 		av[1] = clist[i];
 		av[2] = exflag ? "-" : tmp4;
 		na = 3;
+		/* the native PDP-11 cpp predefined these; ours does not */
+		av[na++] = "-Dunix";
+		av[na++] = "-Dpdp11";
 #ifdef MENLO_OVLY
 		if (ovlyflag)
 			av[na++] = "-DC_OVERLAY";	/* force definition */
@@ -359,7 +416,7 @@ assemble:
 #ifdef MENLO_OVLY
 				ovlyflag ? "ovas" :
 #endif MENLO_OVLY
-				"as", av) > 1) {
+				asname, av) > 1) {
 			cflag++;
 			eflag++;
 			continue;
@@ -400,7 +457,7 @@ nocom:
 #ifdef MENLO_OVLY
 				ovlyflag ? "ovld" :
 #endif MENLO_OVLY
-				"ld", av);
+				ldname, av);
 		if (nc==1 && nxo==1 && eflag==0)
 			cunlink(setsuf(clist[0], 'o'));
 	}
@@ -572,12 +629,19 @@ char *name, **argv;
 {
 	char *pathstr;
 	register char *cp;
-	char fname[128];
+	char fname[1024];
 	char *newargs[256];
 	int i;
 	register unsigned etxtbsy = 1;
 	register eacces = 0;
 
+	/* a name containing '/' is used directly -- no $PATH search.  cc now
+	 * passes absolute pass paths, and searching PATH would both be wrong
+	 * and overflow fname. */
+	if (strchr(name, '/')) {
+		execv(name, argv);
+		return(-1);
+	}
 	if ((pathstr = getenv("PATH")) == NULL)
 		pathstr = ":/bin:/usr/bin";
 	cp = pathstr;
@@ -616,7 +680,7 @@ char *name, **argv;
 	return(-1);
 }
 
-static char *
+char *
 execat(s1, s2, si)
 register char *s1, *s2;
 char *si;
