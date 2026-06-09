@@ -9,6 +9,8 @@
 #endif
 
 char	*tname;
+char	tnamebuf[] = "/tmp/sXXXXXX";	/* writable: mktemp() rewrites in place
+					 * (6 X's: modern mktemp requires it) */
 char	*mktemp();
 struct exec head, nhead;
 int 	a_magic[] = {A_MAGIC1, A_MAGIC2, A_MAGIC3, A_MAGIC4,
@@ -30,7 +32,7 @@ char *argv[];
 	signal(SIGHUP, SIG_IGN);
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
-	tname = mktemp("/tmp/sXXXXX");
+	tname = mktemp(tnamebuf);
 	close(creat(tname, 0600));
 	tf = open(tname, 2);
 	if(tf < 0) {
