@@ -21,6 +21,8 @@ yylex() {
 		char *name;
 		char *value;
 	} *sp;
+	struct symtab *lookup();	/* LP64: needs a prototype, else the
+				 * returned pointer is truncated to int */
 
 for (;;) {
 	newp=skipbl(newp);

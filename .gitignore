@@ -1,1 +1,3 @@
 usr
+*.o
+cpp/cpy.c

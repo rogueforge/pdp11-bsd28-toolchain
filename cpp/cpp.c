@@ -17,9 +17,14 @@ static	char	sccsid[] = "@(#)cpp.c	2.2";	/*	SCCS id keyword	*/
 #define READ 0
 #define WRITE 1
 #define SALT '#'
-#ifndef BUFSIZ
+/*
+ * cpp's buffer arithmetic (SBSIZE-BUFSIZ thresholds, comment/token splits)
+ * is written for BUFSIZ==512, the PDP-11 stdio value.  glibc defines
+ * BUFSIZ as 8192, which makes "SBSIZE-BUFSIZ" tiny and trips the side-buffer
+ * bounds checks immediately, so force the original size.
+ */
+#undef BUFSIZ
 #define BUFSIZ 512
-#endif
 
 char *pbeg,*pbuf,*pend;
 char *outp,*inp;
@@ -141,7 +146,7 @@ STATIC	char	*dirs[10];	/* -I and <> directories */
 char *strdex(), *copy(), *subst(), *trmdir();
 struct symtab *stsym();
 STATIC	int	fin	= STDIN;
-STATIC	FILE	*fout	= stdout;
+STATIC	FILE	*fout	= 0;	/* set to stdout in main (not constant on modern libc) */
 STATIC	int	nd	= 1;
 STATIC	int	pflag;	/* don't put out lines "# 12 foo.c" */
 STATIC	int	passcom;	/* don't delete comments */
@@ -971,6 +976,7 @@ main(argc,argv)
 	register char *p;
 	char *tf,**cp2;
 
+	fout = stdout;
 # if gcos
 	if (setjmp(env)) return (exfail);
 # endif
@@ -1076,7 +1082,7 @@ main(argc,argv)
 	[i don't see what the problem is.  jfr]
 */
 				} else if (fout==stdout) {
-					extern char _sobuf[BUFSIZ];
+					static char _sobuf[BUFSIZ];	/* own buffer (old libc exported _sobuf) */
 					if (NULL==(fout=fopen(argv[i], "w"))) {
 						pperror("Can't create %s", argv[i]); exit(8);
 					} else {fclose(stdout); setbuf(fout,_sobuf);}
