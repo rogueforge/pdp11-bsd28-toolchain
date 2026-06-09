@@ -107,6 +107,12 @@ void pushtok(int tk, long v, char *nm, struct op *kw){
 	pbstk[pbsp].kw=kw; pbsp++;
 }
 
+/* numeric local labels 0..9: each definition `N:' gets a unique mangled
+ * symbol "\1N_<count>"; `Nf' refers to the next definition, `Nb' the
+ * previous.  loccnt[N] counts definitions seen so far in the current pass. */
+int loccnt[10];
+char *locname(int dig, int n){ static char b[16]; sprintf(b,"\1%d_%d",dig,n); return b; }
+
 int idchar(c){ return isalnum(c)||c=='_'||c=='.'||c=='~'; }
 
 int lex()
@@ -134,12 +140,26 @@ again:
 		for(o=optab;o->name;o++) if(strcmp(o->name,tokname)==0) tokkw=o;
 		return tok=TID;
 	}
+	/* numeric local label reference: <digit>f / <digit>b */
+	if (isdigit(c) && (ip[1]=='f'||ip[1]=='b') && !idchar(ip[2])) {
+		int dig=c-'0', dir=ip[1]; ip+=2;
+		strcpy(tokname, dir=='f' ? locname(dig, loccnt[dig]+1)
+					 : locname(dig, loccnt[dig]));
+		tokkw=0; return tok=TID;
+	}
 	if (isdigit(c)) {
 		long v=0; int base=8; char *q=ip;
 		while(isdigit(*q))q++;
 		if(*q=='.') base=10;
 		if(c=='0'&&(ip[1]=='x'||ip[1]=='X')){base=16;ip+=2;}
-		while(isxdigit(*ip)){int d=isdigit(*ip)?*ip-'0':tolower(*ip)-'a'+10; if(d>=base)break; v=v*base+d; ip++;}
+		/* Always consume the whole digit run (8/9 included -- they occur as
+		 * local-label digits and as decimal); accumulate in the base.  The
+		 * digit must advance ip even in octal, or `9:' loops forever. */
+		if(base==16){
+			while(isxdigit(*ip)){int d=isdigit(*ip)?*ip-'0':tolower(*ip)-'a'+10; v=v*16+d; ip++;}
+		} else {
+			while(isdigit(*ip)){ v=v*base+(*ip-'0'); ip++; }
+		}
 		if(*ip=='.') ip++;
 		tokval=v; return tok=TNUM;
 	}
@@ -173,7 +193,9 @@ long term(segp) int *segp; {
 	if(t==TNUM) return tokval;
 	if(t==TID){
 		if(strcmp(tokname,".")==0){ *segp=curseg+1; return dot[curseg]; }
-		if(tokkw&&tokkw->type==024) return tokkw->opcode;
+		if(strcmp(tokname,"..")==0){ *segp=SABS; return 0; }	/* reloc base placeholder */
+		/* register (024) and absolute (01) keywords carry their value */
+		if(tokkw&&(tokkw->type==024||tokkw->type==01)) return tokkw->opcode;
 		sp=lookup(tokname);
 		if(sp->flags&SF_DEF){ *segp=sp->seg; return sp->value; }
 		*segp=SEXT; exsym=sp; return 0;
@@ -257,6 +279,8 @@ void getop(o)
 struct operand *o;
 {
 	int t, defer=0, reg;
+	/* the first operand token, saved so peek() below cannot clobber it */
+	int s_tok; long s_val; char s_name[64]; struct op *s_kw;
 	o->mode=0;o->hasx=0;o->xval=0;o->xseg=SABS;o->xsym=0;o->pcrel=0;
 	t=lex();
 	if(t=='*'){ defer=1; t=lex(); }
@@ -265,6 +289,7 @@ struct operand *o;
 		o->hasx=1; o->xval=expr(&o->xseg); o->xsym=exsym;
 		return;
 	}
+	s_tok=t; s_val=tokval; strcpy(s_name,tokname); s_kw=tokkw;
 	if(t=='('){
 		t=lex(); reg=regof(); if(reg<0){aerror("bad register");reg=0;}
 		if(lex()!=')')aerror("missing )");
@@ -278,12 +303,14 @@ struct operand *o;
 		o->mode=(defer?5:4)*010+reg;
 		return;
 	}
-	if(t==TID && tokkw && tokkw->type==024 && peek()!='('){
-		o->mode=(defer?1:0)*010+tokkw->opcode;	/* Rn ; *Rn=(Rn) */
+	if(t==TID && s_kw && s_kw->type==024 && peek()!='('){
+		o->mode=(defer?1:0)*010+s_kw->opcode;	/* Rn ; *Rn=(Rn) */
 		return;
 	}
-	/* expression: index X(rn) or pc-relative reference */
-	unlex();
+	/* expression: index X(rn) or pc-relative reference.  Push the saved
+	 * first token back (NOT unlex, which would re-push whatever peek last
+	 * looked at) so expr() sees the real start of the operand. */
+	pushtok(s_tok, s_val, s_tok==TID?s_name:0, s_kw);
 	{ int seg; long v; struct sym *sym;
 	  v=expr(&seg); sym=exsym;
 	  if(peek()=='('){
@@ -374,6 +401,8 @@ void assemble()
 			unlex();		/* push t2 back: it starts the operands/expression */
 			if(kw){
 				switch(kw->type){
+				case 01:  /* absolute no-operand insn: setd/clc/sec/cfcc... */
+					  emitword(kw->opcode,SABS,0,0); break;
 				case 013: doublop(kw->opcode); break;
 				case 015: singlop(kw->opcode); break;
 				case 07:  if(strcmp(name,"xor")==0){ /* xor: src,reg like jsr fields */
@@ -409,7 +438,24 @@ void assemble()
 			{ int seg; long v=expr(&seg); doword(v,seg,exsym); }
 			continue;
 		}
-		/* bare numeric/expression statement -> word(s) */
+		if(t==TNUM){
+			long saved=tokval;	/* peek() below clobbers the token state */
+			/* numeric local label definition: `N:' (digit 0..9 then colon) */
+			if(saved>=0 && saved<=9 && peek()==':'){
+				struct sym *sp;
+				lex();			/* consume ':' */
+				sp=lookup(locname(saved, ++loccnt[saved]));
+				sp->flags|=SF_DEF; sp->seg=curseg+1; sp->value=dot[curseg];
+				continue;
+			}
+			/* bare numeric expression -> word(s).  peek() (if it ran) left
+			 * the following token on the pushback stack; push the number in
+			 * front of it so expr() sees the number first. */
+			pushtok(TNUM, saved, 0, 0);
+			{ int seg; long v=expr(&seg); doword(v,seg,exsym); }
+			continue;
+		}
+		/* bare expression statement -> word(s) */
 		unlex();
 		{ int seg; long v=expr(&seg); doword(v,seg,exsym); }
 	}
@@ -463,22 +509,37 @@ main(argc,argv)
 char**argv;
 {
 	int i; long flen; FILE*f;
-	for(i=1;i<argc;i++){
-		if(argv[i][0]=='-'){
-			if(argv[i][1]=='o' && i+1<argc) outfile=argv[++i];
-			else if(argv[i][1]=='u') ; /* accept and ignore (undefined->external) */
-			else if(argv[i][1]==0) ; /* stdin: unsupported, skip */
-			else { /* unknown flag: ignore */ }
-		} else infile=argv[i];
+	/* collect input files: as concatenates several (e.g. the syscall stubs
+	 * are assembled as `as -o x.o /usr/include/sys.s x.s`) */
+	{
+		char *files[64]; long flens[64]; int nf=0;
+		long total=0; char *p;
+		for(i=1;i<argc;i++){
+			if(argv[i][0]=='-'){
+				if(argv[i][1]=='o' && i+1<argc) outfile=argv[++i];
+				else if(argv[i][1]=='u') ; /* undefined->external; default */
+				else { /* other flags ignored */ }
+			} else if(nf<64) files[nf++]=argv[i];
+		}
+		if(nf==0){ fprintf(stderr,"as: no input file\n"); return 1; }
+		infile=files[0];
+		/* read every file (exact bytes -- c1 output has embedded NULs),
+		 * separated by a newline, into one buffer */
+		for(i=0;i<nf;i++){
+			if(!(f=fopen(files[i],"r"))){ perror(files[i]); return 1; }
+			fseek(f,0,2); flen=ftell(f); fseek(f,0,0);
+			p=xalloc(flen+1); flen=fread(p,1,flen,f); fclose(f);
+			files[i]=p; flens[i]=flen;
+			total += flen + 1;
+		}
+		ibuf=xalloc(total+1); p=ibuf;
+		for(i=0;i<nf;i++){ memcpy(p,files[i],flens[i]); p+=flens[i]; *p++='\n'; }
+		*p=0;
+		ibufstart=ibuf; ibufend=p;
 	}
-	if(!infile){ fprintf(stderr,"as: no input file\n"); return 1; }
-	if(!(f=fopen(infile,"r"))){ perror(infile); return 1; }
-	fseek(f,0,2); flen=ftell(f); fseek(f,0,0);
-	ibuf=xalloc(flen+1); flen=fread(ibuf,1,flen,f); ibuf[flen]=0; fclose(f);
-	ibufstart=ibuf; ibufend=ibuf+flen;
 
 	/* pass 1: assign addresses */
-	pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0;
+	pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt);
 	assemble();
 	/* segment sizes are now known (even-rounded, as ld rounds them); the
 	 * data/bss base used to bias values in the unified object space */
@@ -494,7 +555,7 @@ char**argv;
 			sp->index=idx++;
 	}
 	/* pass 2: emit */
-	pass=2; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0;
+	pass=2; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt);
 	assemble();
 	if(errors){ fprintf(stderr,"as: %d error(s)\n",errors); return 1; }
 	writeout();

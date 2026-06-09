@@ -952,12 +952,8 @@ struct table *table;
 	if (opdope[p->op]&BINARY) {
 		if (p->op==LOGAND || p->op==LOGOR)
 			return(0);
-		/* Only binary nodes have a tr2 to delay.  The 2BSD source has
-		 * the brace misplaced so this ran for unary ops too, reading an
-		 * unset tr2 -- harmless on the PDP-11 (NULL/address-0 reads as 0)
-		 * but a garbage deref on the host. */
+		}
 		p1 = sdelay(&p->tr2);
-	}
 	if (p1==0)
 		p1 = sdelay(&p->tr1);
 	if (p1) {
@@ -1024,16 +1020,24 @@ chkleaf(atree, table, reg)
 struct tnode *atree;
 struct table *table;
 {
+	/* On the PDP-11 the unset fields of lbuf were stack garbage, harmless
+	 * because every 16-bit value is a readable address whose contents
+	 * happen not to match the operator tests.  On an LP64 host they are
+	 * wild 8-byte pointers, so zero the node and aim its (dereferenced)
+	 * tr2 at a readable zero node -- same benign outcome, no logic change. */
+	static struct tnode nullnode;
 	struct tnode lbuf;
 	register struct tnode *tree;
 
 	tree = atree;
 	if (tree->op!=STAR && dcalc(tree, nreg-reg) > 12)
 		return(-1);
+	lbuf = nullnode;
 	lbuf.op = LOAD;
 	lbuf.type = tree->type;
 	lbuf.degree = tree->degree;
 	lbuf.tr1 = tree;
+	lbuf.tr2 = &nullnode;
 	return(rcexpr(&lbuf, table, reg));
 }
 
