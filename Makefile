@@ -88,6 +88,17 @@ cpp/cpy.c: cpp/cpy.y
 	cd cpp; ${YACC} cpy.y; mv y.tab.c cpy.c
 
 # =====================================================================
+# Tests
+# =====================================================================
+
+test: tools
+	sh tests/run.sh
+
+# regenerate golden .expected files after an intentional behaviour change
+test-update: tools
+	sh tests/run.sh -u
+
+# =====================================================================
 # Housekeeping
 # =====================================================================
 

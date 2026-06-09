@@ -63,6 +63,29 @@ source.c -> cpp -> c0 -> c1 -> [c2] -> as -> source.o -> ld -> a.out
    binary. `cvopt.c` (C) converts the template form to assembly. For a host
    build the table must become host-buildable data/object.
 
+## Testing
+
+`make test` runs `tests/run.sh`, a small regression harness:
+
+- `tests/cpp/*.c` — golden tests: preprocess the input and diff against
+  `*.expected` (cpp line markers are normalised to basenames so goldens are
+  path-independent). `make test-update` (`run.sh -u`) regenerates goldens
+  after an intentional behaviour change.
+- `tests/binutils/*.sh` (and `tests/<pass>/*.sh` as passes land) — shell
+  tests sourcing `tests/lib.sh`; exit status is the verdict.
+- `tests/fixtures/` — committed real 2.8BSD PDP-11 objects (e.g.
+  `dkleave.o`) for the binutils tests.
+
+## Known limitations (authentic 2.8BSD behaviour, preserved)
+
+- **cpp `defined()` operator leaks `flslvl`.** `#if defined(M)` where `M`
+  is a *defined* macro pre-expands to `defined(10)`; yylex then takes the
+  numeric path, which skips the `--flslvl` reset that only the identifier
+  path performs. The `#if` itself yields the right answer, but the leak
+  suppresses the *next* `#if`. Harmless in 1981 code (which used `#ifdef`,
+  not the then-new `defined()` operator). Captured by
+  `tests/cpp/defined_quirk.c`. Bug-compatible with stock 2.8BSD.
+
 ## Build approach (mirrors VAX project)
 
 - Top-level Makefile using only BSD-make features (no GNU `%` rules,
