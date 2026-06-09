@@ -83,6 +83,18 @@ are added for `c2`, `as`, `ld`, and `cc` as those land.
 - `tests/fixtures/` — committed real 2.8BSD PDP-11 objects (e.g.
   `dkleave.o`) for the binutils tests.
 
+## Known limitations (porting, to revisit)
+
+- **c2 optimizer not yet reliable.** c2 builds, links, and runs, and one
+  real bug is fixed (the local `struct node data` in `movedat` was read
+  uninitialised — the PDP-11 stack happened to be zero there). But it still
+  over-optimizes the standard function prologue (the `jbr L1 … L1: sub sp …
+  jbr L2` stack-adjust idiom every function emits): the dead-code-after-jump
+  pass deletes reachable code. There is also a buffer-overflow corruption in
+  the register-tracking arrays on some inputs. Until these are fixed, **cc
+  does not invoke c2** (the default cpp→c0→c1 pipeline is correct); `-O` is
+  experimental. See docs/c2.md.
+
 ## Known limitations (authentic 2.8BSD behaviour, preserved)
 
 - **cpp `defined()` operator leaks `flslvl`.** `#if defined(M)` where `M`

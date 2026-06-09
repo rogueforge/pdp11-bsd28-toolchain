@@ -6,7 +6,7 @@ static	char	sccsid[] = "@(#)c20.c	2.1";	/*	SCCS id keyword	*/
 
 #include "c2.h"
 
-struct optab optab[] {
+struct optab optab[] = {
 	"jbr",	JBR,
 	"jeq",	CBR | JEQ<<8,
 	"jne",	CBR | JNE<<8,
@@ -60,7 +60,7 @@ struct optab optab[] {
 	".end",	END,
 	0,	0};
 
-char	revbr[] { JNE, JEQ, JGT, JLT, JGE, JLE, JHIS, JLOS, JHI, JLO };
+char	revbr[] = { JNE, JEQ, JGT, JLT, JGE, JLE, JHIS, JLOS, JHI, JLO };
 int	isn	= 20000;
 int	lastseg	= -1;
 
@@ -147,7 +147,7 @@ input()
 
 	lastp = &first;
 	for (;;) {
-		oper = getline();
+		oper = getlin();
 		switch (oper&0377) {
 	
 		case LABEL:
@@ -201,7 +201,7 @@ input()
 	}
 }
 
-getline()
+getlin()
 {
 	register char *lp;
 	register c;

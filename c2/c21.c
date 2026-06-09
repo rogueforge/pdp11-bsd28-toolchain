@@ -603,6 +603,9 @@ movedat()
 	struct node data;
 	struct node *datp;
 
+	data.forw = 0;		/* must be cleared: it is read below when no
+				 * DATA segment is found (the PDP-11 stack
+				 * happened to be zero there) */
 	if (first.forw == 0)
 		return;
 	if (lastseg != TEXT && lastseg != -1) {

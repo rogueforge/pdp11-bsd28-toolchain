@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -141,6 +141,23 @@ c1/table.i: c1/table.s c1/cvopt
 c1/cvopt: c1/cvopt.c; ${HOSTCC} ${O} ${COMPAT} -o $@ c1/cvopt.c
 c1/mktab: c1/mktab.c; ${HOSTCC} ${O} -o $@ c1/mktab.c
 
+# ---------------------------------------------------------------------
+# c2 -- peephole optimizer (operates on c1's assembly).  Builds and runs,
+# but its optimizer is NOT yet reliable: it over-optimizes the standard
+# function prologue (see docs/c2.md / NOTES.md).  cc does NOT invoke it by
+# default; -O is experimental.
+# ---------------------------------------------------------------------
+
+C2FLAGS = ${O} ${COMPAT} -Ic2
+
+c2-tool: ${BIN}/${PREFIX}-c2
+
+${BIN}/${PREFIX}-c2: c2/c20.o c2/c21.o
+	${HOSTCC} ${O} -o $@ c2/c20.o c2/c21.o
+
+c2/c20.o: c2/c20.c c2/c2.h; ${HOSTCC} ${C2FLAGS} -c -o $@ c2/c20.c
+c2/c21.o: c2/c21.c c2/c2.h; ${HOSTCC} ${C2FLAGS} -c -o $@ c2/c21.c
+
 # =====================================================================
 # Tests
 # =====================================================================
@@ -163,4 +180,4 @@ clean:
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
-	      ${BIN}/${PREFIX}-c1
+	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2
