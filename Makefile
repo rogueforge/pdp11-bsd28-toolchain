@@ -30,7 +30,7 @@ COMPAT	= -std=gnu89 -Wno-int-conversion -Wno-incompatible-pointer-types \
 # Toolchain
 # =====================================================================
 
-all: tools
+all: tools libc sim
 
 dirs:
 	mkdir -p ${BIN} ${LIB} ${INC}
@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool cc-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool ar-tool cc-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -190,6 +190,20 @@ ${BIN}/${PREFIX}-ld: ld/ld.c ${UCB_OBJS}
 	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ ld/ld.c ${UCB_OBJS}
 
 # ---------------------------------------------------------------------
+# ar -- archiver.  The authentic 2.8BSD ar.c, ported for LP64: the on-disk
+# member header is a 26-byte record (V7 ar_hdr) and the magic is a 16-bit
+# word -- both assume sizeof(int)==2, so the header struct is pinned to
+# fixed widths and packed (cross/ar.h layout) and fstat() is read through
+# the host struct stat.  Produces plain (no __.SYMDEF) archives that ld
+# scans member-by-member to resolve -l libraries.
+# ---------------------------------------------------------------------
+
+ar-tool: ${BIN}/${PREFIX}-ar
+
+${BIN}/${PREFIX}-ar: ar/ar.c
+	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ ar/ar.c
+
+# ---------------------------------------------------------------------
 # cc -- compiler driver.
 # ---------------------------------------------------------------------
 
@@ -198,11 +212,54 @@ cc-tool: ${BIN}/${PREFIX}-cc
 ${BIN}/${PREFIX}-cc: cc/cc.c
 	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ cc/cc.c
 
+# ---------------------------------------------------------------------
+# libc + crt0 -- the authentic 2.8BSD startup (crt0/csv) and C-library
+# syscall stubs, assembled by our as (with the syscall-number header
+# prepended) and archived by our ar into usr/lib/libc.a.  crt0.o is
+# installed separately (cc links it explicitly).  Members are listed in
+# dependency order (referencer before definer) because this ld scans a
+# plain archive single-pass; a ranlib/__.SYMDEF table would remove that
+# ordering requirement.
+# ---------------------------------------------------------------------
+ASM  = ${BIN}/${PREFIX}-as
+LSYS = libc/include/sys.s
+
+libc: as-tool ar-tool dirs
+	${ASM} -o ${LIB}/crt0.o ${LSYS} libc/csu/crt0.s
+	${ASM} -o libc/csv.o      libc/crt/csv.s
+	${ASM} -o libc/cleanup.o  libc/gen/cleanup.s
+	${ASM} -o libc/cerror.o   ${LSYS} libc/crt/cerror.s
+	${ASM} -o libc/cuexit.o   ${LSYS} libc/gen/cuexit.s
+	${ASM} -o libc/write.o    ${LSYS} libc/sys/write.s
+	${ASM} -o libc/read.o     ${LSYS} libc/sys/read.s
+	${ASM} -o libc/open.o     ${LSYS} libc/sys/open.s
+	${ASM} -o libc/close.o    ${LSYS} libc/sys/close.s
+	${ASM} -o libc/creat.o    ${LSYS} libc/sys/creat.s
+	${ASM} -o libc/lseek.o    ${LSYS} libc/sys/lseek.s
+	${ASM} -o libc/exit.o     ${LSYS} libc/sys/exit.s
+	${ASM} -o libc/sbrk.o     ${LSYS} libc/sys/sbrk.s
+	${ASM} -o libc/unlink.o   ${LSYS} libc/sys/unlink.s
+	${ASM} -o libc/fstat.o    ${LSYS} libc/sys/fstat.s
+	rm -f ${LIB}/libc.a
+	${BIN}/${PREFIX}-ar rc ${LIB}/libc.a \
+		libc/cuexit.o libc/write.o libc/read.o libc/open.o \
+		libc/close.o libc/creat.o libc/lseek.o libc/exit.o \
+		libc/sbrk.o libc/unlink.o libc/fstat.o libc/csv.o \
+		libc/cleanup.o libc/cerror.o
+
+# ---------------------------------------------------------------------
+# apsim -- host-side user-mode PDP-11 simulator that runs the produced
+# a.out (loads text/data, emulates the 2BSD sys traps), to verify end to
+# end.  Not part of the produced toolchain; a verification aid.
+# ---------------------------------------------------------------------
+sim: dirs sim/apsim.c
+	${HOSTCC} ${O} -o ${BIN}/${PREFIX}-apsim sim/apsim.c
+
 # =====================================================================
 # Tests
 # =====================================================================
 
-test: tools
+test: tools libc sim
 	sh tests/run.sh
 
 # regenerate golden .expected files after an intentional behaviour change
@@ -215,10 +272,11 @@ test-update: tools
 
 clean:
 	rm -f as/*.o c0/*.o c1/*.o c2/*.o cpp/*.o cpp/cpy.c libucbpath/*.o
-	rm -f c1/table.i c1/table.c c1/cvopt c1/mktab
+	rm -f c1/table.i c1/table.c c1/cvopt c1/mktab libc/*.o libc/*/*.o
 
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
 	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-as \
-	      ${BIN}/${PREFIX}-ld ${BIN}/${PREFIX}-cc
+	      ${BIN}/${PREFIX}-ld ${BIN}/${PREFIX}-ar ${BIN}/${PREFIX}-cc \
+	      ${BIN}/${PREFIX}-apsim ${LIB}/crt0.o ${LIB}/libc.a

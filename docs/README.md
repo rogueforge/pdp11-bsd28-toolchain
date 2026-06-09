@@ -20,9 +20,12 @@ source.c ─cpp─▶ ─c0─▶ ─c1─▶ [c2] ─as─▶ file.o ─ld─�
 | [c0.md](c0.md) | `c0` | compiler pass 1 (parser) | done |
 | [c1.md](c1.md) | `c1` + codegen table | compiler pass 2 (PDP-11 codegen) | done |
 | [c2.md](c2.md) | `c2` | peephole optimizer | builds; optimizer not yet reliable |
-| [as.md](as.md) | `as` | assembler (C reimplementation) | core works; numeric local labels todo |
-| [ld.md](ld.md) | `ld` | link editor | links objects; verified by relocated disassembly |
-| [cc.md](cc.md) | `cc` | compiler driver | -S works; -c/-o need as/ld |
+| [as.md](as.md) | `as` | assembler (C reimplementation) | done (incl. local labels, multi-file, EIS) |
+| [ld.md](ld.md) | `ld` | link editor | done; links objects + archives, relocation verified |
+| [ar.md](ar.md) | `ar` | archiver (builds libc.a) | done |
+| [cc.md](cc.md) | `cc` | compiler driver | done; `cc x.c -o x` compiles+links a runnable a.out |
+| [libc.md](libc.md) | libc + crt0 | runtime (authentic 2.8BSD libc) | minimal: startup + syscall stubs |
+| [apsim.md](apsim.md) | `apsim` | host-side PDP-11 simulator | verification aid (runs the output) |
 
 ## Porting philosophy
 

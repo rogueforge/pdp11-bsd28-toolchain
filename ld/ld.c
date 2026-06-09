@@ -22,6 +22,7 @@ char	*sccsid = "@(#)ld.c	2.6 ld";
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <stdint.h>
 
 
@@ -1452,10 +1453,30 @@ char *acp;
 	infil = -1;
 	archdr.aname[0] = '\0';
 	if (cp[0]=='-' && cp[1]=='l') {
+		static char libpath[256];
+		static char libdir[256];
 		if(cp[2] == '\0')
 			cp = "-la";
-		filname = fullname;
-		infil = openlp(filname, 0, "lib/lib", cp + 2, ".a", 0);
+		/* Resolve the library directory relative to the ld binary via
+		 * /proc/self/exe, like cc's setup_tools and the vax project's ld:
+		 * .../usr/bin/<prefix>-ld -> .../usr/lib/lib<x>.a.  (The authentic
+		 * openlp $PATH search assumes an installed /usr tree.) */
+		strcpy(libdir, "/usr/lib");
+		{ static char selfpath[1024];
+		  int n = readlink("/proc/self/exe", selfpath, sizeof selfpath - 1);
+		  if (n > 0) {
+			char *sl; selfpath[n] = '\0';
+			for (sl = selfpath+n; sl > selfpath && sl[-1] != '/'; sl--);
+			if (sl-selfpath >= 4 &&
+			    sl[-4]=='b' && sl[-3]=='i' && sl[-2]=='n' && sl[-1]=='/') {
+				sl[-4] = '\0';
+				sprintf(libdir, "%slib", selfpath);
+			}
+		  }
+		}
+		sprintf(libpath, "%s/lib%s.a", libdir, cp + 2);
+		filname = libpath;
+		infil = open(filname, 0);
 	}
 	else {
 		filname = cp;
