@@ -12,15 +12,15 @@ static	char	sccsid[] = "@(#)c00.c	2.3";	/*	SCCS id keyword	*/
 
 #include "c0.h"
 
-int	isn	1;
-int	peeksym	-1;
-int	line	1;
-struct	tnode	funcblk { NAME, 0, NULL, NULL, NULL, NULL };
+int	isn =	1;
+int	peeksym = -1;
+int	line =	1;
+struct	tnode	funcblk = { NAME, 0, NULL, NULL, NULL, NULL };
 
 struct kwtab {
 	char	*kwname;
 	int	kwval;
-} kwtab[]
+} kwtab[] =
 {
 	"int",		INT,
 	"char",		CHAR,
@@ -102,7 +102,7 @@ char *argv[];
 	for (ip=kwtab; (sp = ip->kwname); ip++) {
 		i = 0;
 		while (*sp)
-			i =+ *sp++;
+			i += *sp++;
 		hshtab[i%HSHSIZ].hflag = FKEYW;
 	}
 	coremax = funcbase = curbase = sbrk(0);
@@ -129,7 +129,7 @@ lookup()
 	ihash = 0;
 	sp = symbuf;
 	while (sp<symbuf+NCPS)
-		ihash =+ *sp++&0177;
+		ihash += *sp++&0177;
 	rp = &hshtab[ihash%HSHSIZ];
 	if (rp->hflag&FKEYW)
 		if (findkw())
@@ -153,11 +153,11 @@ lookup()
 	rp->hclass = 0;
 	rp->htype = 0;
 	rp->hoffset = 0;
-	rp->subsp = NULL;
-	rp->strp = NULL;
+	rp->hsubsp = NULL;
+	rp->hstrp = NULL;
 	rp->hpdown = NULL;
 	rp->hblklev = blklev;
-	rp->hflag =| mossym;
+	rp->hflag |= mossym;
 	sp = symbuf;
 	for (np=rp->name; sp<symbuf+NCPS;)
 		*np++ = *sp++;
@@ -406,18 +406,18 @@ getnum()
 		*np++ = c;
 		if (ctab[c]==DIGIT || (base==16) && ('a'<=c&&c<='f'||'A'<=c&&c<='F')) {
 			if (base==8)
-				lcval =<< 3;
+				lcval <<= 3;
 			else if (base==10)
 				lcval = ((lcval<<2) + lcval)<<1;
 			else
-				lcval =<< 4;
+				lcval <<= 4;
 			if (ctab[c]==DIGIT)
-				c =- '0';
+				c -= '0';
 			else if (c>='a')
-				c =- 'a'-10;
+				c -= 'a'-10;
 			else
-				c =- 'A'-10;
-			lcval =+ c;
+				c -= 'A'-10;
+			lcval += c;
 			ndigit++;
 			if (c>maxdigit)
 				maxdigit = c;
@@ -589,8 +589,8 @@ loop:
 			n = 0;
 			c = 0;
 			while (++c<=3 && '0'<=a && a<='7') {
-				n =<< 3;
-				n =+ a-'0';
+				n <<= 3;
+				n += a-'0';
 				a = getchar();
 			}
 			mpeek = a;
@@ -657,7 +657,7 @@ advanc:
 				if (initflg) {
 					cs->hclass = EXTERN;
 					error("(Warning only)");
-					nerror =- 2;
+					nerror -= 2;
 				}
 			}
 		*cp++ = nblock(cs);
@@ -669,9 +669,10 @@ advanc:
 
 	case LCON:
 		cs = gblock(sizeof(*lcp));
-		cs->op = LCON;
-		cs->type = LONG;
-		cs->lvalue = lcval;
+		/* cs is reused here as an lnode, not a symbol-table entry */
+		((struct lnode *)cs)->op = LCON;
+		((struct lnode *)cs)->type = LONG;
+		((struct lnode *)cs)->lvalue = lcval;
 		*cp++ = cs;
 		goto tand;
 
@@ -718,7 +719,7 @@ advanc:
 	case INCBEF:
 	case DECBEF:
 		if (andflg)
-			o =+ 2;
+			o += 2;
 		goto oponst;
 
 	case COMPL:
@@ -887,7 +888,7 @@ struct hshtab *atyb;
 	funcbase = fb;
 	maxdecl = md;
 	cp = scp;
-	tyb->op = ETYPE;
+	((struct tnode *)tyb)->op = ETYPE;	/* tyb reused as a tree node */
 	return(tyb);
 }
 

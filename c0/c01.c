@@ -40,9 +40,11 @@ build(op)
 	 * sizeof gets turned into a number here.
 	 */
 	if (op==SIZEOF) {
-		t1 = cblock(length(p1));
-		t1->type = UNSIGN;
-		*cp++ = t1;
+		/* t1 is an int here; cblock() returns a node pointer, which
+		 * would be truncated by t1 on LP64 -- use the spare p3 */
+		p3 = cblock(length(p1));
+		p3->type = UNSIGN;
+		*cp++ = p3;
 		return;
 	}
 	if (op!=AMPER) {
@@ -129,20 +131,20 @@ build(op)
 	 * then * is tacked on to access the member.
 	 */
 	case ARROW:
-		if (p2->op!=NAME || p2->tr1->hclass!=MOS) {
+		if (p2->op!=NAME || ((struct hshtab *)p2->tr1)->hclass!=MOS) {
 			error("Illegal structure ref");
 			*cp++ = p1;
 			return;
 		}
-		if (t2==INT && p2->tr1->hflag&FFIELD)
+		if (t2==INT && ((struct hshtab *)p2->tr1)->hflag&FFIELD)
 			t2 = UNSIGN;
 		t = incref(t2);
 		chkw(p1, -1);
 		setype(p1, t, p2);
-		*cp++ = block(PLUS,t,p2->subsp,p2->strp,p1,cblock(p2->tr1->hoffset));
+		*cp++ = block(PLUS,t,p2->subsp,p2->strp,p1,cblock(((struct hshtab *)p2->tr1)->hoffset));
 		build(STAR);
-		if (p2->tr1->hflag&FFIELD)
-			*cp++ = block(FSEL,UNSIGN,NULL,NULL,*--cp,p2->tr1->hstrp);
+		if (((struct hshtab *)p2->tr1)->hflag&FFIELD)
+			*cp++ = block(FSEL,UNSIGN,NULL,NULL,*--cp,((struct hshtab *)p2->tr1)->hstrp);
 		return;
 	}
 	if ((dope&LVALUE)!=0)
@@ -168,7 +170,7 @@ build(op)
 	} else
 		cvn = cvtab[lintyp(t1)][lintyp(t2)];
 	leftc = (cvn>>4)&017;
-	cvn =& 017;
+	cvn &= 017;
 	t = leftc? t2:t1;
 	if ((t==INT||t==CHAR) && (t1==UNSIGN||t2==UNSIGN))
 		t = UNSIGN;
@@ -193,11 +195,11 @@ build(op)
 		if (t1>=PTR && t1==t2)
 			cvn = 0;
 		if (op!=COLON && (t1>=PTR || t2>=PTR))
-			op =+ MAXP-MAX;
+			op += MAXP-MAX;
 	} else if (dope&RELAT) {
 		if (op>=LESSEQ && (t1>=PTR||t2>=PTR||(t1==UNSIGN||t2==UNSIGN)
 		 && (t==INT||t==CHAR||t==UNSIGN)))
-			op =+ LESSEQP-LESSEQ;
+			op += LESSEQP-LESSEQ;
 		if (cvn==ITP || cvn==PTI)
 			cvn = 0;
 	}
@@ -325,7 +327,7 @@ struct tnode *ap;
 
 	p = ap;
 	/* check array & not MOS and not typer */
-	if (((t = p->type)&XTYPE)!=ARRAY || p->op==NAME&&p->tr1->hclass==MOS
+	if (((t = p->type)&XTYPE)!=ARRAY || p->op==NAME&&((struct hshtab *)p->tr1)->hclass==MOS
 	 || p->op==ETYPE)
 		return(p);
 	p->subsp++;
@@ -470,12 +472,12 @@ gblock(n)
 	register int *p;
 
 	p = curbase;
-	if ((curbase =+ n) >= coremax) {
+	if ((curbase += n) >= coremax) {
 		if (sbrk(1024) == -1) {
 			error("Out of space");
 			exit(1);
 		}
-		coremax =+ 1024;
+		coremax += 1024;
 	}
 	return(p);
 }
@@ -530,15 +532,15 @@ struct tnode *ap1, *ap2;
 	switch (op) {
 
 	case PLUS:
-		v1 =+ v2;
+		v1 += v2;
 		break;
 
 	case MINUS:
-		v1 =- v2;
+		v1 -= v2;
 		break;
 
 	case TIMES:
-		v1 =* v2;
+		v1 *= v2;
 		break;
 
 	case DIVIDE:
@@ -548,7 +550,7 @@ struct tnode *ap1, *ap2;
 			v1 = (unsigned)v1 / v2;
 			break;
 		}
-		v1 =/ v2;
+		v1 /= v2;
 		break;
 
 	case MOD:
@@ -558,19 +560,19 @@ struct tnode *ap1, *ap2;
 			v1 = (unsigned)v1 % v2;
 			break;
 		}
-		v1 =% v2;
+		v1 %= v2;
 		break;
 
 	case AND:
-		v1 =& v2;
+		v1 &= v2;
 		break;
 
 	case OR:
-		v1 =| v2;
+		v1 |= v2;
 		break;
 
 	case EXOR:
-		v1 =^ v2;
+		v1 ^= v2;
 		break;
 
 	case NEG:
@@ -582,7 +584,7 @@ struct tnode *ap1, *ap2;
 		break;
 
 	case LSHIFT:
-		v1 =<< v2;
+		v1 <<= v2;
 		break;
 
 	case RSHIFT:
@@ -590,7 +592,7 @@ struct tnode *ap1, *ap2;
 			v1 = (unsigned)v1 >> v2;
 			break;
 		}
-		v1 =>> v2;
+		v1 >>= v2;
 		break;
 
 	case EQUAL:

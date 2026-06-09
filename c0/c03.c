@@ -163,14 +163,14 @@ strdec(mosf, kind)
 			pushdecl(ssym);
 		if (ssym->hclass==0) {
 			ssym->hclass = tagkind;
-			ssym->strp = gblock(sizeof(*strp));
+			ssym->hstrp = gblock(sizeof(*strp));
 			funcbase = curbase;
-			ssym->strp->ssize = 0;
-			ssym->strp->memlist = NULL;
+			ssym->hstrp->ssize = 0;
+			ssym->hstrp->memlist = NULL;
 		}
 		if (ssym->hclass != tagkind)
 			redec();
-		strp = ssym->strp;
+		strp = ssym->hstrp;
 	} else {
 		strp = gblock(sizeof(*strp));
 		funcbase = curbase;
@@ -249,11 +249,11 @@ struct hshtab *tptr;
 		}
 		o = decl1(skw, tptr, isunion?0:offset, NULL);
 		if (isunion) {
-			o =+ align(CHAR, o, 0);
+			o += align(CHAR, o, 0);
 			if (o>offset)
 				offset = o;
 		} else
-			offset =+ o;
+			offset += o;
 	} while ((o=symbol()) == COMMA);
 	if (o==RBRACE) {
 		peeksym = o;
@@ -294,7 +294,7 @@ struct hshtab *atptr, *absname;
 		peeksym = -1;
 		t1 = conexp();
 		elsize = align(tptr->htype, offset, t1);
-		bitoffs =+ t1;
+		bitoffs += t1;
 		return(elsize);
 	}
 	t1 = getype(&dim, absname);
@@ -305,7 +305,7 @@ struct hshtab *atptr, *absname;
 		for (a=0; type&XTYPE;) {
 			if ((type&XTYPE)==ARRAY)
 				dim.dimens[dim.rank++] = tptr->hsubsp[a++];
-			type =>> TYLEN;
+			type >>= TYLEN;
 		}
 	}
 	type = tptr->htype & ~TYPE;
@@ -315,16 +315,16 @@ struct hshtab *atptr, *absname;
 			type = t1 = 0;
 		}
 		type = type<<TYLEN | (t1 & XTYPE);
-		t1 =>> TYLEN;
+		t1 >>= TYLEN;
 	}
-	type =| tptr->htype&TYPE;
+	type |= tptr->htype&TYPE;
 	if (absname)
 		defsym = absname;
 	dsym = defsym;
 	if (dsym->hblklev < blklev)
 		pushdecl(dsym);
 	if (dim.rank == 0)
-		dsym->subsp = NULL;
+		dsym->hsubsp = NULL;
 	else {
 		dp = gblock(dim.rank*sizeof(dim.rank));
 		funcbase = curbase;
@@ -333,10 +333,10 @@ struct hshtab *atptr, *absname;
 		for (a=0; a<dim.rank; a++) {
 			if ((t1 = dp[a] = dim.dimens[a])
 			 && (dsym->htype&XTYPE) == ARRAY
-			 && dsym->subsp[a] && t1!=dsym->subsp[a])
+			 && dsym->hsubsp[a] && t1!=dsym->hsubsp[a])
 				redec();
 		}
-		dsym->subsp = dp;
+		dsym->hsubsp = dp;
 	}
 	if ((type&XTYPE) == FUNC) {
 		if (skw==AUTO)
@@ -371,7 +371,7 @@ struct hshtab *atptr, *absname;
 		if (paraml==0)
 			paraml = dsym;
 		else
-			parame->hoffset = dsym;
+			parame->hpnext = dsym;
 		parame = dsym;
 		dsym->hclass = skw;
 		return(0);
@@ -385,25 +385,25 @@ struct hshtab *atptr, *absname;
 			t1 = conexp();
 			a = align(type, offset, t1);
 			if (dsym->hflag&FFIELD) {
-				if (dsym->hstrp->bitoffs!=bitoffs
-			 	 || dsym->hstrp->flen!=t1)
+				if (((struct field *)dsym->hstrp)->bitoffs!=bitoffs
+			 	 || ((struct field *)dsym->hstrp)->flen!=t1)
 					redec();
 			} else {
 				dsym->hstrp = gblock(sizeof(*fldp));
 				funcbase = curbase;
 			}
-			dsym->hflag =| FFIELD;
-			dsym->hstrp->bitoffs = bitoffs;
-			dsym->hstrp->flen = t1;
-			bitoffs =+ t1;
+			dsym->hflag |= FFIELD;
+			((struct field *)dsym->hstrp)->bitoffs = bitoffs;
+			((struct field *)dsym->hstrp)->flen = t1;
+			bitoffs += t1;
 		} else
 			a = align(type, offset, 0);
-		elsize =+ a;
-		offset =+ a;
+		elsize += a;
+		offset += a;
 		if (++nmems >= NMEMS) {
 			error("Too many structure members");
-			nmems =- NMEMS/2;
-			memlist =- NMEMS/2;
+			nmems -= NMEMS/2;
+			memlist -= NMEMS/2;
 		}
 		if (a)
 			*memlist++ = &structhole;
@@ -423,13 +423,13 @@ struct hshtab *atptr, *absname;
 		peeksym = a;
 	if (skw==AUTO) {
 	/*	if (STAUTO < 0) {	*/
-			autolen =- rlength(dsym);
+			autolen -= rlength(dsym);
 			dsym->hoffset = autolen;
 			if (autolen < maxauto)
 				maxauto = autolen;
 	/*	} else { 			*/
 	/*		dsym->hoffset = autolen;	*/
-	/*		autolen =+ rlength(dsym);	*/
+	/*		autolen += rlength(dsym);	*/
 	/*		if (autolen > maxauto)		*/
 	/*			maxauto = autolen;	*/
 	/*	}			*/
@@ -474,7 +474,7 @@ struct phshtab *asp;
 	maxdecl = funcbase = curbase;
 	cpysymb(nsp, sp);
 	sp->hclass = 0;
-	sp->hflag =& (FKEYW|FMOS);
+	sp->hflag &= (FKEYW|FMOS);
 	sp->htype = 0;
 	sp->hoffset = 0;
 	sp->hblklev = blklev;
@@ -626,7 +626,7 @@ align(type, offset, aflen)
 	t = type;
 	ftl = "Field too long";
 	if (flen==0) {
-		a =+ (NBPC+bitoffs-1) / NBPC;
+		a += (NBPC+bitoffs-1) / NBPC;
 		bitoffs = 0;
 	}
 	while ((t&XTYPE)==ARRAY)
@@ -642,14 +642,14 @@ align(type, offset, aflen)
 				error(ftl);
 			if (flen+bitoffs > NBPW) {
 				bitoffs = 0;
-				a =+ NCPW;
+				a += NCPW;
 			}
 		} else if (type==CHAR) {
 			if (flen > NBPC)
 				error(ftl);
 			if (flen+bitoffs > NBPC) {
 				bitoffs = 0;
-				a =+ 1;
+				a += 1;
 			}
 		} else
 			error("Bad type for field");

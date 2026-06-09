@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool
+tools: dirs binutils cpp-tool c0-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -87,6 +87,27 @@ cpp/cpy.o: cpp/cpy.c cpp/yylex.c
 cpp/cpy.c: cpp/cpy.y
 	cd cpp; ${YACC} cpy.y; mv y.tab.c cpy.c
 
+# ---------------------------------------------------------------------
+# c0 -- compiler pass 1 (parser / front end).  Emits intermediate code
+# read by c1.  -fms-extensions for the tnode anonymous-union superset.
+# ---------------------------------------------------------------------
+
+C0FLAGS = ${O} ${COMPAT} -fms-extensions -Icross -Ic0
+
+C0_OBJS = c0/c00.o c0/c01.o c0/c02.o c0/c03.o c0/c04.o c0/c05.o
+
+c0-tool: ${BIN}/${PREFIX}-c0
+
+${BIN}/${PREFIX}-c0: ${C0_OBJS}
+	${HOSTCC} ${O} -o $@ ${C0_OBJS}
+
+c0/c00.o: c0/c00.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c00.c
+c0/c01.o: c0/c01.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c01.c
+c0/c02.o: c0/c02.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c02.c
+c0/c03.o: c0/c03.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c03.c
+c0/c04.o: c0/c04.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c04.c
+c0/c05.o: c0/c05.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c05.c
+
 # =====================================================================
 # Tests
 # =====================================================================
@@ -107,4 +128,4 @@ clean:
 
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
-	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp
+	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0

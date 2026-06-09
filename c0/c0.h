@@ -59,15 +59,32 @@ struct field {
 };
 
 /*
- * Structure of tree nodes for operators
+ * Structure of tree nodes for operators.
+ *
+ * The original (pre-1977) C compiler relied on struct members being
+ * resolved by name to a global offset, so a `struct tnode *' was freely
+ * used to reach the constant/long/float/field variants below (cnode,
+ * lnode, fnode, field), whose layouts share the op/type/subsp/strp
+ * prefix.  Modern C requires the member to belong to the pointer's type,
+ * so tnode is made a superset: an anonymous union holds the variant tail.
+ * The prefix matches cnode, lnode and fnode exactly, so a tnode pointer
+ * and a cnode/lnode/fnode pointer still alias the same fields (compiled
+ * with -fms-extensions for the anonymous struct and union members).
  */
 struct tnode {
 	int	op;		/* operator */
 	int	type;		/* data type */
 	int	*subsp;		/* subscript list (for arrays) */
 	struct	str *strp;	/* structure description for structs */
-	struct	tnode *tr1;	/* left operand */
-	struct	tnode *tr2;	/* right operand */
+	union {
+		struct {
+			struct tnode *tr1;	/* left operand */
+			struct tnode *tr2;	/* right operand */
+		};
+		int	value;		/* cnode: integer constant */
+		LTYPE	lvalue;		/* lnode: long constant */
+		char	*cstr;		/* fnode: float constant string */
+	};
 };
 
 /*
@@ -133,6 +150,9 @@ struct hshtab {
 	int	hoffset;	/* post-allocation location */
 	struct	phshtab *hpdown;	/* Pushed-down name in outer block */
 	char	hblklev;	/* Block level of definition */
+	struct	hshtab *hpnext;	/* parameter-list link (was overlaid on
+				 * hoffset; a real pointer here so it is not
+				 * truncated into an int on LP64 hosts) */
 	char	name[NCPS];	/* ASCII name */
 };
 
@@ -153,10 +173,10 @@ struct swtab {
 	int	swval;
 };
 
-char	cvtab[4][4];
+extern char	cvtab[4][4];
 char	filename[64];
-int	opdope[];
-char	ctab[];
+extern int	opdope[];
+extern char	ctab[];
 char	symbuf[NCPS+2];
 int	hshused;
 struct	hshtab	hshtab[HSHSIZ];
@@ -186,8 +206,8 @@ int	cval;
 LTYPE	lcval;
 int	nchstr;
 int	nerror;
-struct	hshtab	**paraml;
-struct	hshtab	**parame;
+struct	hshtab	*paraml;	/* head of current function's parameter list */
+struct	hshtab	*parame;	/* tail of same (linked via hpnext) */
 int	strflg;
 int	mosflg;
 int	initflg;
@@ -197,7 +217,7 @@ FILE	*sbufp;
 int	regvar;
 int	bitoffs;
 struct	tnode	funcblk;
-char	cvntab[];
+extern char	cvntab[];
 char	numbuf[64];
 struct	hshtab **memlist;
 int	nmems;
@@ -448,6 +468,8 @@ int	mossym;
 /*
  * functions
  */
+void	outcode(char *, ...);	/* variadic: needs a prototype so callers
+				 * use the correct varargs calling convention */
 char	*sbrk();
 struct	tnode *tree();
 char	*copnum();

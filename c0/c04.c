@@ -7,6 +7,7 @@
  */
 
 #include "c0.h"
+#include <stdarg.h>
 
 /*
  * Reduce the degree-of-reference by one.
@@ -94,7 +95,7 @@ struct tnode *atp;
 		break;
 
 	case LCON:
-		outcode("BNNN", tp->op, tp->type, tp->lvalue);
+		outcode("BNL", tp->op, tp->type, tp->lvalue);
 		break;
 
 	case CON:
@@ -111,7 +112,7 @@ struct tnode *atp;
 
 	case FSEL:
 		treeout(tp->tr1, nextisstruct);
-		outcode("BNNN",tp->op,tp->type,tp->tr2->bitoffs,tp->tr2->flen);
+		outcode("BNNN",tp->op,tp->type,((struct field *)tp->tr2)->bitoffs,((struct field *)tp->tr2)->flen);
 		break;
 
 	case ETYPE:
@@ -195,7 +196,7 @@ struct tnode *acs;
 	nd = 0;
 	while ((t&XTYPE) == ARRAY) {
 		t = decref(t);
-		n =* cs->subsp[nd++];
+		n *= cs->subsp[nd++];
 	}
 	if ((t&~TYPE)==FUNC)
 		return(0);
@@ -263,7 +264,7 @@ simplegoto()
 			pushdecl(csp);
 		if (csp->hclass==0 && csp->htype==0) {
 			csp->htype = ARRAY;
-			csp->hflag =| FLABL;
+			csp->hflag |= FLABL;
 			if (csp->hoffset==0)
 				csp->hoffset = isn++;
 		}
@@ -366,37 +367,65 @@ doret()
  *   1: number 1
  *   0: number 0
  */
-outcode(s, a)
-char *s;
+/*
+ * Emit one item of intermediate code to the code temp (stdout) or, when
+ * strflg is set, the string/data temp.  Format codes:
+ *   B  operator/byte value, followed by the 0376 marker byte
+ *   N  a 16-bit word (low byte, high byte)
+ *   L  a long, as 32 bits little-endian (two words, low word first)
+ *   S  a symbol name (<=NCPS chars, '_'-prefixed if nonempty), 0-terminated
+ *   F  a float-constant string (<=1000 chars), 0-terminated
+ *   0  the constant word 0
+ *   1  the constant word 1
+ *
+ * The original read the arguments as PDP-11 stack words (ap = &a; *ap++),
+ * where an int/pointer was one word and a long two consecutive words.
+ * That layout is invalid on register-argument LP64 ABIs (x86-64), so the
+ * arguments are gathered with stdarg and emitted by type instead.  The
+ * 'L' code replaces the original pair of 'N' codes that consumed a long
+ * by walking two stack words.  The on-disk byte stream is unchanged.
+ */
+void outcode(char *s, ...)
 {
-	register *ap;
 	register FILE *bufp;
-	int n;
+	int n, v;
+	long lv;
 	register char *np;
+	va_list ap;
 
 	bufp = stdout;
 	if (strflg)
 		bufp = sbufp;
-	ap = &a;
+	va_start(ap, s);
 	for (;;) switch(*s++) {
 	case 'B':
-		putc(*ap++, bufp);
+		v = va_arg(ap, int);
+		putc(v, bufp);
 		putc(0376, bufp);
 		continue;
 
 	case 'N':
-		putc(*ap, bufp);
-		putc(*ap++>>8, bufp);
+		v = va_arg(ap, int);
+		putc(v, bufp);
+		putc(v>>8, bufp);
+		continue;
+
+	case 'L':
+		lv = va_arg(ap, long);
+		putc(lv, bufp);
+		putc(lv>>8, bufp);
+		putc(lv>>16, bufp);
+		putc(lv>>24, bufp);
 		continue;
 
 	case 'F':
 		n = 1000;
-		np = *ap++;
+		np = va_arg(ap, char *);
 		goto str;
 
 	case 'S':
 		n = NCPS;
-		np = *ap++;
+		np = va_arg(ap, char *);
 		if (*np)
 			putc('_', bufp);
 	str:
@@ -417,6 +446,7 @@ char *s;
 		continue;
 
 	case '\0':
+		va_end(ap);
 		if (ferror(bufp)) {
 			error("Write error on temp");
 			exit(1);
