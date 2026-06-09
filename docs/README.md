@@ -22,7 +22,8 @@ source.c ─cpp─▶ ─c0─▶ ─c1─▶ [c2] ─as─▶ file.o ─ld─�
 | [c2.md](c2.md) | `c2` | peephole optimizer | builds; optimizer not yet reliable |
 | [as.md](as.md) | `as` | assembler (C reimplementation) | done (incl. local labels, multi-file, EIS) |
 | [ld.md](ld.md) | `ld` | link editor | done; links objects + archives, relocation verified |
-| [ar.md](ar.md) | `ar` | archiver (builds libc.a) | done |
+| [ar.md](ar.md) | `ar` | archiver (canonical V7/2.9 ar) | done |
+| [ranlib.md](ranlib.md) | `ranlib` | __.SYMDEF table of contents | done |
 | [cc.md](cc.md) | `cc` | compiler driver | done; `cc x.c -o x` compiles+links a runnable a.out |
 | [libc.md](libc.md) | libc + crt0 | runtime (authentic 2.8BSD libc) | minimal: startup + syscall stubs |
 | [apsim.md](apsim.md) | `apsim` | host-side PDP-11 simulator | verification aid (runs the output) |

@@ -82,8 +82,9 @@ char	goodnm[] = "__.SYMDEF";
 #define TABSZ	700
 struct tab
 {	char cname[8];
-	long cloc;
-} tab[TABSZ];
+	int32_t cloc;		/* on-disk byte offset of the member: 4 bytes,
+				 * so the ranlib entry is 12 bytes (not 16 on LP64) */
+} __attribute__((packed)) tab[TABSZ];
 int tnum;
 
 
@@ -660,6 +661,10 @@ ldrand()
 		if ((pp = slookup(tab[i].cname)) == 0)
 			continue;
 		sp = *pp;
+		if (sp == 0)		/* empty hash slot: this __.SYMDEF symbol is
+					 * not referenced.  On the PDP-11 the next line
+					 * read address 0 harmlessly; guard it here. */
+			continue;
 		if (sp->stype != EXTERN+UNDEF)
 			continue;
 		step(tab[i].cloc >> 1);

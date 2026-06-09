@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool ar-tool cc-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool ld-tool ar-tool ranlib-tool cc-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -203,6 +203,13 @@ ar-tool: ${BIN}/${PREFIX}-ar
 ${BIN}/${PREFIX}-ar: ar/ar.c
 	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ ar/ar.c
 
+# ranlib -- adds a __.SYMDEF table of contents so ld resolves archive members
+# regardless of order (the canonical V7/2.9 ranlib, paired with the canonical ar).
+ranlib-tool: ${BIN}/${PREFIX}-ranlib
+
+${BIN}/${PREFIX}-ranlib: ranlib/ranlib.c
+	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ ranlib/ranlib.c
+
 # ---------------------------------------------------------------------
 # cc -- compiler driver.
 # ---------------------------------------------------------------------
@@ -224,7 +231,7 @@ ${BIN}/${PREFIX}-cc: cc/cc.c
 ASM  = ${BIN}/${PREFIX}-as
 LSYS = libc/include/sys.s
 
-libc: as-tool ar-tool dirs
+libc: as-tool ar-tool ranlib-tool dirs
 	${ASM} -o ${LIB}/crt0.o ${LSYS} libc/csu/crt0.s
 	${ASM} -o libc/csv.o      libc/crt/csv.s
 	${ASM} -o libc/cleanup.o  libc/gen/cleanup.s
@@ -246,6 +253,7 @@ libc: as-tool ar-tool dirs
 		libc/close.o libc/creat.o libc/lseek.o libc/exit.o \
 		libc/sbrk.o libc/unlink.o libc/fstat.o libc/csv.o \
 		libc/cleanup.o libc/cerror.o
+	${BIN}/${PREFIX}-ranlib ${LIB}/libc.a
 
 # ---------------------------------------------------------------------
 # apsim -- host-side user-mode PDP-11 simulator that runs the produced
@@ -279,4 +287,5 @@ distclean: clean
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
 	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-as \
 	      ${BIN}/${PREFIX}-ld ${BIN}/${PREFIX}-ar ${BIN}/${PREFIX}-cc \
+	      ${BIN}/${PREFIX}-ar ${BIN}/${PREFIX}-ranlib \
 	      ${BIN}/${PREFIX}-apsim ${LIB}/crt0.o ${LIB}/libc.a
