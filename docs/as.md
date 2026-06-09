@@ -69,3 +69,14 @@ end to end.
 ${BIN}/${PREFIX}-as: as/as.c as/optab.h
 	${HOSTCC} ${O} ${COMPAT} -Ias -o $@ as/as.c
 ```
+
+## Update: fixes found while assembling real c1 output
+
+- **Duplicate mnemonics (mul/div/ash).** These appear in as19.s first as
+  absolute EAE register addresses (type 1) and later as the EIS instruction
+  (type 030).  2BSD's symbol table is last-wins; the lexer now keeps the
+  last match so `mul` is the instruction, not the address.
+- **Embedded NULs.** c1 emits `mov%c` with a 0 modifier for word ops, i.e.
+  a literal `mov\0` in the assembly; the original as skipped it.  The lexer
+  now treats an embedded NUL as whitespace and detects real end-of-input by
+  buffer length, not the first NUL.

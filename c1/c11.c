@@ -5,6 +5,7 @@
  */
 
 #include "c1.h"
+#include <stdarg.h>
 
 max(a, b)
 {
@@ -507,6 +508,7 @@ struct swtab *afp, *alp;
 }
 
 ispow2(atree)
+struct tnode *atree;
 {
 	register int d;
 	register struct tnode *tree;
@@ -520,6 +522,7 @@ ispow2(atree)
 	return(0);
 }
 
+struct tnode *
 pow2(atree)
 struct tnode *atree;
 {
@@ -768,12 +771,16 @@ popstk(a)
 	printf("add	$%o,sp\n", a);
 }
 
-error(s, p1, p2, p3, p4, p5, p6)
+/* variadic so char* arguments (e.g. %.8s names) are not truncated to int
+ * on LP64 the way the old fixed-parameter form would */
+void error(char *s, ...)
 {
-
+	va_list ap;
 	nerror++;
 	fprintf(stderr, "%d: ", line);
-	fprintf(stderr, s, p1, p2, p3, p4, p5, p6);
+	va_start(ap, s);
+	vfprintf(stderr, s, ap);
+	va_end(ap);
 	putc('\n', stderr);
 }
 

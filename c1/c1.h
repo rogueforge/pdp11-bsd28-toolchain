@@ -131,8 +131,9 @@ struct	swtab {
  * (often cross-file) do not default to int and truncate on LP64 */
 struct	tnode	*strfunc(), *lconst(), *optim(), *tnode(), *getblk(), *tconst();
 struct	tnode	*unoptim(), *lvfield(), *acommute(), *isconstant(), *hardlongs();
-struct	tnode	*sdelay(), *ncopy();
+struct	tnode	*sdelay(), *ncopy(), *pow2();
 char	*outname(), *sbrk();
+void	error(char *, ...);	/* variadic: needs a prototype on LP64 */
 extern char	maprel[];
 extern char	notrel[];
 int	nreg;

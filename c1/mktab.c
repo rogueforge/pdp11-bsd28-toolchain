@@ -169,13 +169,14 @@ int main(int argc, char **argv)
 		}
 		if (inopt) {					/* .byte d,t;.byte d2,t2 */
 			int d1, t1, d2, t2;
-			if (sscanf(s, ".byte %d,%d;.byte %d,%d", &d1,&t1,&d2,&t2) == 4) {
+			/* cvopt emits these match bytes with %o, so they are OCTAL */
+			if (sscanf(s, ".byte %o,%o;.byte %o,%o", &d1,&t1,&d2,&t2) == 4) {
 				char tl[4096], *ts;
 				if (fgets(tl, sizeof tl, stdin)) {
 					ts = tl;
 					while (*ts==' '||*ts=='\t') ts++;
 					clean(ts);
-					fprintf(fopt, "\t{%d,%d,%d,%d, %s},\n", d1,t1,d2,t2, ts);
+					fprintf(fopt, "\t{0%o,0%o,0%o,0%o, %s},\n", d1,t1,d2,t2, ts);
 				}
 			}
 			continue;

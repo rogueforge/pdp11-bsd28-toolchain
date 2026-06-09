@@ -606,6 +606,7 @@ struct acl {
 
 struct tnode *
 acommute(atree)
+struct tnode *atree;
 {
 	struct acl acl;
 	int d, i, op, flt, d1;
@@ -940,6 +941,7 @@ register struct tnode *lp, *rp;
 }
 
 insert(op, atree, alist)
+struct tnode *atree;
 struct acl *alist;
 {
 	register d;
@@ -1026,6 +1028,12 @@ getblk(size)
 
 	if (size&01)
 		abort();
+	/* On the PDP-11 every node variant was the same size; with the union
+	 * superset, tnode is larger than tname/tconst/etc., so a node allocated
+	 * at a variant's size and later used as a full tnode would read past
+	 * its block.  Always allocate a full tnode. */
+	if (size < sizeof(struct tnode))
+		size = sizeof(struct tnode);
 	p = curbase;
 	if ((curbase += size) >= coremax) {
 		if (sbrk(1024) == -1) {
@@ -1034,6 +1042,10 @@ getblk(size)
 		}
 		coremax += 1024;
 	}
+	/* zero the block: curbase is reset per function, so memory gets
+	 * reused; the PDP-11 relied on fresh (zero) sbrk pages, but reused
+	 * blocks carry stale data -> uninitialised node pointers on the host */
+	{ register char *q; for (q=(char *)p; q<(char *)curbase; q++) *q=0; }
 	return(p);
 }
 

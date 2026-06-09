@@ -65,7 +65,7 @@ struct sym {
 struct sym *htab[NHASH];
 
 char *infile, *outfile = "a.out";
-char *ibuf, *ibufstart;
+char *ibuf, *ibufstart, *ibufend;
 int errors, pass, lineno;
 
 /* TEXT=0 DATA=1 BSS=2 */
@@ -114,7 +114,11 @@ int lex()
 	int c;
 	if (pbsp) { pbsp--; tok=pbstk[pbsp].tok; tokval=pbstk[pbsp].val; strcpy(tokname,pbstk[pbsp].name); tokkw=pbstk[pbsp].kw; return tok; }
 again:
-	while (*ip==' '||*ip=='\t') ip++;
+	/* skip blanks; an embedded NUL is whitespace (c1 emits "mov%c" with a
+	 * 0 modifier, i.e. "mov\0", for word ops -- the 2BSD as skipped it).
+	 * True end-of-input is the buffer end, tracked by ibufend. */
+	while (ip<ibufend && (*ip==' '||*ip=='\t'||*ip==0)) ip++;
+	if (ip>=ibufend) return tok=TEOF;
 	c=*ip;
 	if (c==0) return tok=TEOF;
 	if (c=='/') { while(*ip&&*ip!='\n')ip++; goto again; }
@@ -124,7 +128,10 @@ again:
 		int n=0; struct op*o;
 		while (idchar(*ip)) { if(n<63)tokname[n++]=*ip; ip++; }
 		tokname[n]=0; tokkw=0;
-		for(o=optab;o->name;o++) if(strcmp(o->name,tokname)==0){tokkw=o;break;}
+		/* last match wins, matching 2BSD as's overwriting symbol table:
+		 * mul/div/ash appear first as absolute EAE register addresses and
+		 * later as the EIS instruction, which is the one that must win */
+		for(o=optab;o->name;o++) if(strcmp(o->name,tokname)==0) tokkw=o;
 		return tok=TID;
 	}
 	if (isdigit(c)) {
@@ -453,8 +460,8 @@ char**argv;
 	if(!infile){ fprintf(stderr,"as: no input file\n"); return 1; }
 	if(!(f=fopen(infile,"r"))){ perror(infile); return 1; }
 	fseek(f,0,2); flen=ftell(f); fseek(f,0,0);
-	ibuf=xalloc(flen+1); fread(ibuf,1,flen,f); ibuf[flen]=0; fclose(f);
-	ibufstart=ibuf;
+	ibuf=xalloc(flen+1); flen=fread(ibuf,1,flen,f); ibuf[flen]=0; fclose(f);
+	ibufstart=ibuf; ibufend=ibuf+flen;
 
 	/* pass 1: assign addresses */
 	pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0;

@@ -952,8 +952,12 @@ struct table *table;
 	if (opdope[p->op]&BINARY) {
 		if (p->op==LOGAND || p->op==LOGOR)
 			return(0);
-		}
+		/* Only binary nodes have a tr2 to delay.  The 2BSD source has
+		 * the brace misplaced so this ran for unary ops too, reading an
+		 * unset tr2 -- harmless on the PDP-11 (NULL/address-0 reads as 0)
+		 * but a garbage deref on the host. */
 		p1 = sdelay(&p->tr2);
+	}
 	if (p1==0)
 		p1 = sdelay(&p->tr1);
 	if (p1) {
@@ -971,6 +975,10 @@ struct tnode **ap;
 	register struct tnode *p, *p1;
 
 	p = *ap;
+	if (p == 0)		/* NULL operand (e.g. a unary op's tr2): no delay.
+				 * Harmless on the PDP-11 where address 0 reads as 0,
+				 * but a segfault on the host. */
+		return(0);
 	if ((p->op==INCAFT||p->op==DECAFT) && p->tr1->op==NAME) {
 		*ap = ncopy(p->tr1);
 		return(p);
@@ -1037,6 +1045,7 @@ struct table *table;
  * for future popping.
  */
 comarg(atree, flagp)
+struct tnode *atree;
 int *flagp;
 {
 	register struct tnode *tree;

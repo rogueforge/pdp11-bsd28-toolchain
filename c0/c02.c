@@ -588,7 +588,8 @@ forstmt()
 struct tnode *
 pexpr()
 {
-	register o, t;
+	register o;
+	register struct tnode *t;	/* tree() returns a pointer, not int */
 
 	if ((o=symbol())!=LPARN)
 		goto syntax;

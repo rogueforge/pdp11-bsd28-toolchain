@@ -469,6 +469,7 @@ int	mossym;
  * functions
  */
 void	outcode(char *, ...);	/* variadic: needs a prototype so callers
+void	error(char *, ...);
 				 * use the correct varargs calling convention */
 char	*sbrk();
 struct	tnode *tree();

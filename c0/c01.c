@@ -7,6 +7,7 @@
  */
 
 #include "c0.h"
+#include <stdarg.h>
 
 /*
  * Called from tree, this routine takes the top 1, 2, or 3
@@ -381,13 +382,17 @@ lintyp(t)
 /*
  * Report an error.
  */
-error(s, p1, p2, p3, p4, p5, p6)
+/* variadic so char* arguments are not truncated to int on LP64 */
+void error(char *s, ...)
 {
+	va_list ap;
 	nerror++;
 	if (filename[0])
 		fprintf(stderr, "%s:", filename);
 	fprintf(stderr, "%d: ", line);
-	fprintf(stderr, s, p1, p2, p3, p4, p5, p6);
+	va_start(ap, s);
+	vfprintf(stderr, s, ap);
+	va_end(ap);
 	fprintf(stderr, "\n");
 }
 
@@ -469,8 +474,14 @@ char *string;
 char *
 gblock(n)
 {
-	register int *p;
+	register char *p;
 
+	/* nodes are accessed via the tnode union superset, larger than the
+	 * cnode/lnode/fnode variants this is often called with; never allocate
+	 * less than a full tnode, and zero it (curbase is reset per function,
+	 * so blocks are reused with stale contents) */
+	if (n < sizeof(struct tnode))
+		n = sizeof(struct tnode);
 	p = curbase;
 	if ((curbase += n) >= coremax) {
 		if (sbrk(1024) == -1) {
@@ -479,6 +490,7 @@ gblock(n)
 		}
 		coremax += 1024;
 	}
+	{ register char *q; for (q = p; q < curbase; q++) *q = 0; }
 	return(p);
 }
 
