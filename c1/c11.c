@@ -43,14 +43,13 @@ struct tnode *ap;
 {
 	register i;
 	register struct tnode *p;
-	struct { int intx[2]; };
 
 	p = ap;
 loop:
 	switch(p->op) {
 
 	case LCON:
-		printf("$%o", flag>10? p->lvalue.intx[1]:p->lvalue.intx[0]);
+		printf("$%o", flag>10? ((short *)&p->lvalue)[1]:((short *)&p->lvalue)[0]);
 		return;
 
 	case SFCON:
@@ -66,7 +65,7 @@ loop:
 	case NAME:
 		i = p->offset;
 		if (flag>10)
-			i =+ 2;
+			i += 2;
 		if (i) {
 			psoct(i);
 			if (p->class!=OFFS)
@@ -211,7 +210,7 @@ struct tnode *ap;
 		return(at!=INT && at!=UNSIGN && at<PTR);
 	if (st==9 && (at&XTYPE))
 		return(0);
-	st =- 2;
+	st -= 2;
 	if ((at&(~(TYPE+XTYPE))) != 0)
 		at = 020;
 	if ((at&(~TYPE)) != 0)
@@ -229,8 +228,8 @@ struct instab *itable;
 	register struct instab *insp;
 	register char *ip;
 
-	for (insp=itable; insp->op != 0; insp++) {
-		if (insp->op == op) {
+	for (insp=itable; insp->iop != 0; insp++) {
+		if (insp->iop == op) {
 			ip = c? insp->str2: insp->str1;
 			if (ip==0)
 				break;
@@ -342,7 +341,7 @@ arlength(t)
  * wfj 5/80 
  */
 #ifdef MENLO_OVLY
-char	dirsw[] {"\
+char	dirsw[] = {"\
 cmp	r0,$%o\n\
 jhi	L%d\n\
 asl	r0\n\
@@ -351,7 +350,7 @@ jmp	*L%d(r0)\n\
 L%d:\
 " };
 
-char	hashsw[] {"\
+char	hashsw[] = {"\
 mov	r0,r1\n\
 clr	r0\n\
 div	$%o,r0\n\
@@ -361,7 +360,7 @@ jmp	*L%d(r1)\n\
 L%d:\
 "};
 #else
-char	dirsw[] {"\
+char	dirsw[] = {"\
 cmp	r0,$%o\n\
 jhi	L%d\n\
 asl	r0\n\
@@ -370,7 +369,7 @@ jmp	*L%d(r0)\n\
 L%d:\
 " };
 
-char	hashsw[] {"\
+char	hashsw[] = {"\
 mov	r0,r1\n\
 clr	r0\n\
 div	$%o,r0\n\
@@ -529,7 +528,7 @@ struct tnode *atree;
 
 	tree = atree;
 	if (d = ispow2(tree)) {
-		for (i=0; (d=>>1)!=0; i++);
+		for (i=0; (d >>= 1)!=0; i++);
 		tree->tr2->value = i;
 		switch (tree->op) {
 
@@ -639,7 +638,7 @@ again:
 	else {
 		l1 = tree->tr2->op;
 	 	if ((l1==CON || l1==SFCON) && tree->tr2->value==0)
-			op =+ 200;		/* special for ptr tests */
+			op += 200;		/* special for ptr tests */
 		else
 			op = maprel[op-EQUAL];
 	}
@@ -714,7 +713,7 @@ struct tnode *atree;
  *  NO:	...
  * Note some tests may not be needed.
  */
-char	lrtab[2][3][6] {
+char	lrtab[2][3][6] = {
 	0,	NEQUAL,	LESS,	LESS,	GREAT,	GREAT,
 	NEQUAL,	0,	GREAT,	GREAT,	LESS,	LESS,
 	EQUAL,	NEQUAL,	LESSEQP,LESSP,	GREATQP,GREATP,
@@ -787,7 +786,9 @@ psoct(an)
 		n = -n;
 		sign = '-';
 	}
-	printf("%c%o", sign, n);
+	if (sign)			/* avoid emitting a NUL %c for positives */
+		putchar(sign);
+	printf("%o", n);
 }
 
 /*
@@ -803,7 +804,7 @@ getree()
 	struct swtab *swp;
 	double atof();
 	char numbuf[64];
-	struct tname *np;
+	struct tnode *np;	/* superset: reaches xtname.name and tname.nloc */
 	struct xtname *xnp;
 	struct ftconst *fp;
 	struct lconst *lp;
@@ -821,7 +822,7 @@ getree()
 			exit(1);
 		}
 		lbl = 0;
-		switch(op =& 0377) {
+		switch(op &= 0377) {
 
 	case SINIT:
 		printf("%o\n", geti());
@@ -866,8 +867,8 @@ getree()
 		break;
 
 	case CSPACE:
-		t = outname(s);
-		printf(".comm	%.8s,%o\n", t, geti());
+		outname(s);
+		printf(".comm	%.8s,%o\n", s, geti());
 		break;
 
 	case SSPACE:
@@ -897,7 +898,7 @@ getree()
 		if (t==2)
 			printf("tst	-(sp)\n");
 		else if (t != 0)
-			printf("sub	$%o,sp\n", t);
+			printf("sub	$%o,sp\n", t & 0177777);	/* 16-bit */
 		break;
 
 	case PROFIL:
@@ -907,18 +908,18 @@ getree()
 		break;
 
 	case SNAME:
-		t = outname(s);
-		printf("~%s=L%d\n", t+1, geti());
+		outname(s);
+		printf("~%s=L%d\n", s+1, geti());
 		break;
 
 	case ANAME:
-		t = outname(s);
-		printf("~%s=%o\n", t+1, geti());
+		outname(s);
+		printf("~%s=%o\n", s+1, geti());
 		break;
 
 	case RNAME:
-		t = outname(s);
-		printf("~%s=r%d\n", t+1, geti());
+		outname(s);
+		printf("~%s=r%d\n", s+1, geti());
 		break;
 
 	case SWIT:
@@ -1042,13 +1043,13 @@ getree()
 		break;
 
 	case NLABEL:
-		t = outname(s);
-		printf("%.8s:\n", t, t);
+		outname(s);
+		printf("%.8s:\n", s, s);
 		break;
 
 	case RLABEL:
-		t = outname(s);
-		printf("%.8s:\n~~%s:\n", t, t+1);
+		outname(s);
+		printf("%.8s:\n~~%s:\n", s, s+1);
 		break;
 
 	case BRANCH:
@@ -1065,10 +1066,18 @@ getree()
 				error("Binary expression botch");
 				exit(1);
 			}
-			t = *--sp;
-			*sp++ = tnode(op, geti(), *--sp, t);
-		} else
-			sp[-1] = tnode(op, geti(), sp[-1]);
+			{ struct tnode *rt, *lt; int ty;
+			/* operands are tnode pointers; the original stashed one
+			 * in the int `t' and relied on fixed arg-eval order --
+			 * both break on LP64 */
+			rt = *--sp;
+			lt = *--sp;
+			ty = geti();
+			*sp++ = tnode(op, ty, lt, rt); }
+		} else {
+			int ty = geti();
+			sp[-1] = tnode(op, ty, sp[-1]);
+		}
 		break;
 	}
 	}
@@ -1083,7 +1092,9 @@ geti()
 	return(i);
 }
 
+char *
 outname(s)
+char *s;		/* LP64: parameter and return are char*, not int */
 {
 	register char *p, c;
 	register n;

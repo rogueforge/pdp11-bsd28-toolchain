@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -108,6 +108,39 @@ c0/c03.o: c0/c03.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c03.c
 c0/c04.o: c0/c04.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c04.c
 c0/c05.o: c0/c05.c c0/c0.h; ${HOSTCC} ${C0FLAGS} -c -o $@ c0/c05.c
 
+# ---------------------------------------------------------------------
+# c1 -- compiler pass 2 (PDP-11 code generator).  c10-c13 + the codegen
+# table.  The table is authored in table.s (a template language); cvopt
+# expands it to assembler, and mktab (host helper) converts that to C so
+# it can be compiled and linked in instead of assembled for the PDP-11.
+#
+#   table.s --cvopt--> c1/table.i --mktab--> c1/table.c --cc--> table.o
+# ---------------------------------------------------------------------
+
+C1FLAGS = ${O} ${COMPAT} -fms-extensions -Icross -Ic1
+
+C1_OBJS = c1/c10.o c1/c11.o c1/c12.o c1/c13.o c1/table.o
+
+c1-tool: ${BIN}/${PREFIX}-c1
+
+${BIN}/${PREFIX}-c1: ${C1_OBJS}
+	${HOSTCC} ${O} -o $@ ${C1_OBJS}
+
+c1/c10.o: c1/c10.c c1/c1.h; ${HOSTCC} ${C1FLAGS} -c -o $@ c1/c10.c
+c1/c11.o: c1/c11.c c1/c1.h; ${HOSTCC} ${C1FLAGS} -c -o $@ c1/c11.c
+c1/c12.o: c1/c12.c c1/c1.h; ${HOSTCC} ${C1FLAGS} -c -o $@ c1/c12.c
+c1/c13.o: c1/c13.c c1/c1.h; ${HOSTCC} ${C1FLAGS} -c -o $@ c1/c13.c
+c1/table.o: c1/table.c c1/c1.h; ${HOSTCC} ${C1FLAGS} -c -o $@ c1/table.c
+
+c1/table.c: c1/table.i c1/mktab
+	c1/mktab c1/table.i c1/table.c
+
+c1/table.i: c1/table.s c1/cvopt
+	c1/cvopt c1/table.s c1/table.i
+
+c1/cvopt: c1/cvopt.c; ${HOSTCC} ${O} ${COMPAT} -o $@ c1/cvopt.c
+c1/mktab: c1/mktab.c; ${HOSTCC} ${O} -o $@ c1/mktab.c
+
 # =====================================================================
 # Tests
 # =====================================================================
@@ -125,7 +158,9 @@ test-update: tools
 
 clean:
 	rm -f as/*.o c0/*.o c1/*.o c2/*.o cpp/*.o cpp/cpy.c libucbpath/*.o
+	rm -f c1/table.i c1/table.c c1/cvopt c1/mktab
 
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
-	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0
+	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
+	      ${BIN}/${PREFIX}-c1

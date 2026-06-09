@@ -7,10 +7,10 @@
 
 #include "c1.h"
 
+struct tnode *
 optim(atree)
 struct tnode *atree;
 {
-	struct { int intx[4]; };
 	register op, dope;
 	int d1, d2;
 	struct tnode *t;
@@ -28,11 +28,11 @@ struct tnode *atree;
 	dope = opdope[op];
 	if ((dope&LEAF) != 0) {
 		if (op==FCON
-		 && tree->fvalue.intx[1]==0
-		 && tree->fvalue.intx[2]==0
-		 && tree->fvalue.intx[3]==0) {
+		 && ((short *)&tree->fvalue)[1]==0
+		 && ((short *)&tree->fvalue)[2]==0
+		 && ((short *)&tree->fvalue)[3]==0) {
 			tree->op = SFCON;
-			tree->value = tree->fvalue.intx[0];
+			tree->value = ((short *)&tree->fvalue)[0];
 		}
 		return(tree);
 	}
@@ -68,7 +68,7 @@ struct tnode *atree;
 			tree->op = PLUS;
 			if (t->type==DOUBLE)
 				/* PDP-11 FP representation */
-				t->value =^ 0100000;
+				t->value ^= 0100000;
 			else
 				t->value = -t->value;
 		}
@@ -196,8 +196,8 @@ struct tnode *atree;
 		}
 	case ULSH:
 	case ASULSH:
-		d1 =+ 2;
-		d2 =+ 2;
+		d1 += 2;
+		d2 += 2;
 		if (tree->type==LONG)
 			return(hardlongs(tree));
 		goto constant;
@@ -222,7 +222,7 @@ struct tnode *atree;
 		if (tree->tr2->op==CON && tree->tr2->value==1
 		 && tree->tr1->type!=UNSIGN)
 			goto constant;
-		op =+ (LSHIFT-RSHIFT);
+		op += (LSHIFT-RSHIFT);
 		tree->op = op;
 		tree->tr2 = tnode(NEG, tree->type, tree->tr2);
 		if (tree->tr1->type==UNSIGN) {
@@ -235,7 +235,7 @@ struct tnode *atree;
 
 	constant:
 		if (tree->tr1->op==CON && tree->tr2->op==CON) {
-			const(op, &tree->tr1->value, tree->tr2->value);
+			constfold(op, &tree->tr1->value, tree->tr2->value);
 			return(tree->tr1);
 		}
 
@@ -266,12 +266,12 @@ struct tnode *atree;
 	return(tree);
 }
 
+struct tnode *
 unoptim(atree)
 struct tnode *atree;
 {
-	struct { int intx[4]; };
 	register struct tnode *subtre, *tree;
-	register int *p;
+	register struct tnode *p;
 	double static fv;
 	struct ftconst *fp;
 
@@ -324,9 +324,9 @@ struct tnode *atree;
 		if (subtre->op!=CON)
 			break;
 		fv = subtre->value;
-		p = &fv;
-		p++;
-		if (*p++==0 && *p++==0 && *p++==0) {
+		/* true if all but the first 16-bit word of fv are zero
+		 * (the original walked fv word-by-word through an int*) */
+		if (((short *)&fv)[1]==0 && ((short *)&fv)[2]==0 && ((short *)&fv)[3]==0) {
 			tree = getblk(sizeof(*fp));
 			tree->op = SFCON;
 			tree->type = DOUBLE;
@@ -361,7 +361,7 @@ struct tnode *atree;
 			return(p);
 
 		case NAME:
-			p->offset =+ 2;
+			p->offset += 2;
 			p->type = tree->type;
 			return(p);
 
@@ -446,7 +446,7 @@ struct tnode *atree;
 		}
 		if (subtre->op==PLUS && p->op==NAME && p->class==REG) {
 			if (subtre->tr2->op==CON) {
-				p->offset =+ subtre->tr2->value;
+				p->offset += subtre->tr2->value;
 				p->class = OFFS;
 				p->type = tree->type;
 				p->regno = p->nloc;
@@ -454,7 +454,7 @@ struct tnode *atree;
 			}
 			if (subtre->tr2->op==AMPER) {
 				subtre = subtre->tr2->tr1;
-				subtre->class =+ XOFFS-EXTERN;
+				subtre->class += XOFFS-EXTERN;
 				subtre->regno = p->nloc;
 				subtre->type = tree->type;
 				return(subtre);
@@ -528,12 +528,12 @@ struct tnode *atree;
 		 * PDP-11 FP negation
 		 */
 		if (subtre->op==SFCON) {
-			subtre->value =^ 0100000;
-			subtre->fvalue.intx[0] =^ 0100000;
+			subtre->value ^= 0100000;
+			((short *)&subtre->fvalue)[0] ^= 0100000;
 			return(subtre);
 		}
 		if (subtre->op==FCON) {
-			subtre->fvalue.intx[0] =^ 0100000;
+			((short *)&subtre->fvalue)[0] ^= 0100000;
 			return(subtre);
 		}
 	}
@@ -544,14 +544,15 @@ struct tnode *atree;
 
 /*
  * Deal with assignments to partial-word fields.
- * The game is that select(x) =+ y turns into
- * select(x =+ select(y)) where the shifts and masks
+ * The game is that select(x) += y turns into
+ * select(x += select(y)) where the shifts and masks
  * are chosen properly.  The outer select
  * is discarded where the value doesn't matter.
- * Sadly, overflow is undetected on =+ and the like.
+ * Sadly, overflow is undetected on += and the like.
  * Pure assignment is handled specially.
  */
 
+struct tnode *
 lvfield(at)
 struct tnode *at;
 {
@@ -603,6 +604,7 @@ struct acl {
 	struct tnode *llist[LSTSIZ+1];
 };
 
+struct tnode *
 acommute(atree)
 {
 	struct acl acl;
@@ -624,7 +626,7 @@ acommute(atree)
 			if (t2[0]->op==CON && t2[-1]->op==CON) {
 				acl.nextl--;
 				t2--;
-				const(op, &t2[0]->value, t2[1]->value);
+				constfold(op, &t2[0]->value, t2[1]->value);
 			} else if (t = lconst(op, t2[-1], t2[0])) {
 				acl.nextl--;
 				t2--;
@@ -648,7 +650,7 @@ acommute(atree)
 		/* subsume constant in "&x+c" */
 		if (op==PLUS && t2[0]->op==CON && t2[-1]->op==AMPER) {
 			t2--;
-			t2[0]->tr1->offset =+ t2[1]->value;
+			t2[0]->tr1->offset += t2[1]->value;
 			acl.nextl--;
 		}
 	} else if (op==TIMES || op==AND) {
@@ -763,7 +765,7 @@ struct acl *list;
 	t->type = (*p1)->type;
 	t->tr1 = (*p1);
 	t->tr2 = (*p2)->tr1;
-	(*p1)->tr2->value =/ (*p2)->tr2->value;
+	(*p1)->tr2->value /= (*p2)->tr2->value;
 	(*p2)->tr1 = t;
 	t = optim(*p2);
 	if (p1 < p2) {
@@ -786,37 +788,36 @@ struct tnode **p, **maxp;
 		*np = *(np+1);
 }
 
-const(op, vp, av)
+constfold(op, vp, av)
 int *vp;
 {
 	register int v;
-	struct { unsigned u;};
 
 	v = av;
 	switch (op) {
 
 	case PTOI:
-		(*vp).u =/ v;
+		*(unsigned *)vp /= v;	/* was (*vp).u : unsigned divide */
 		return;
 
 	case PLUS:
-		*vp =+ v;
+		*vp += v;
 		return;
 
 	case TIMES:
-		*vp =* v;
+		*vp *= v;
 		return;
 
 	case AND:
-		*vp =& v;
+		*vp &= v;
 		return;
 
 	case OR:
-		*vp =| v;
+		*vp |= v;
 		return;
 
 	case EXOR:
-		*vp =^ v;
+		*vp ^= v;
 		return;
 
 	case DIVIDE:
@@ -825,21 +826,21 @@ int *vp;
 			error("Divide check");
 		else
 			if (op==DIVIDE)
-				*vp =/ v;
+				*vp /= v;
 			else
-				*vp =% v;
+				*vp %= v;
 		return;
 
 	case RSHIFT:
-		*vp =>> v;
+		*vp >>= v;
 		return;
 
 	case LSHIFT:
-		*vp =<< v;
+		*vp <<= v;
 		return;
 
 	case ANDN:
-		*vp =& ~ v;
+		*vp &= ~ v;
 		return;
 	}
 	error("C error: const");
@@ -965,7 +966,7 @@ ins:
 		  && tree->tr1->op==PLUS && tree->tr1->tr2->op==CON) {
 			d = tree->tr2->value;
 			if (tree->op==TIMES)
-				tree->tr2->value =* tree->tr1->tr2->value;
+				tree->tr2->value *= tree->tr1->tr2->value;
 			else
 				tree->tr2->value = tree->tr1->tr2->value << d;
 			tree->tr1->tr2->value = d;
@@ -988,6 +989,7 @@ ins:
 	list->llist[list->nextl++] = tree;
 }
 
+struct tnode *
 tnode(op, type, tr1, tr2)
 struct tnode *tr1, *tr2;
 {
@@ -1005,6 +1007,7 @@ struct tnode *tr1, *tr2;
 	return(p);
 }
 
+struct tnode *
 tconst(val, type)
 {
 	register struct tconst *p;
@@ -1016,19 +1019,20 @@ tconst(val, type)
 	return(p);
 }
 
+struct tnode *
 getblk(size)
 {
-	register *p;
+	register struct tnode *p;
 
 	if (size&01)
 		abort();
 	p = curbase;
-	if ((curbase =+ size) >= coremax) {
+	if ((curbase += size) >= coremax) {
 		if (sbrk(1024) == -1) {
 			error("Out of space-- c1");
 			exit(1);
 		}
-		coremax =+ 1024;
+		coremax += 1024;
 	}
 	return(p);
 }
@@ -1040,6 +1044,7 @@ islong(t)
 	return(1);
 }
 
+struct tnode *
 isconstant(at)
 struct tnode *at;
 {
@@ -1053,6 +1058,7 @@ struct tnode *at;
 	return(0);
 }
 
+struct tnode *
 hardlongs(at)
 struct tnode *at;
 {
@@ -1064,13 +1070,13 @@ struct tnode *at;
 	case TIMES:
 	case DIVIDE:
 	case MOD:
-		t->op =+ LTIMES-TIMES;
+		t->op += LTIMES-TIMES;
 		break;
 
 	case ASTIMES:
 	case ASDIV:
 	case ASMOD:
-		t->op =+ LASTIMES-ASTIMES;
+		t->op += LASTIMES-ASTIMES;
 		t->tr1 = tnode(AMPER, LONG+PTR, t->tr1);
 		break;
 

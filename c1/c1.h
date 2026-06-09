@@ -11,13 +11,39 @@
 #define	NULL	0
 
 /*
- *  Tree node for unary and binary
+ *  Tree node for unary and binary.
+ *
+ * As in c0, the pre-1977 code reaches the variant node layouts below
+ * (tname, xtname, tconst, lconst, ftconst, fasgn) through a plain
+ * struct tnode * by name/offset.  tnode is therefore a superset: an
+ * anonymous union (compiled with -fms-extensions) holds every variant
+ * tail, all sharing the {op,type} prefix.  The separate structs are kept
+ * for the typed allocators; their members alias the union branches here.
  */
 struct	tnode {
 	int	op;
 	int	type;
-	int	degree;
-	struct	tnode *tr1, *tr2;
+	union {
+		struct {		/* operator node / field assignment */
+			int	degree;
+			struct	tnode *tr1, *tr2;
+			int	mask;		/* fasgn */
+		};
+		struct {		/* local / external name */
+			char	class;
+			char	regno;
+			int	offset;
+			union {
+				int	nloc;		/* tname */
+				char	name[NCPS];	/* xtname */
+			};
+		};
+		struct {		/* integer / float constant */
+			int	value;
+			double	fvalue;		/* ftconst */
+		};
+		LTYPE	lvalue;		/* long constant */
+	};
 };
 
 /*
@@ -101,22 +127,28 @@ struct	swtab {
 	int	swval;
 };
 
-char	maprel[];
-char	notrel[];
+/* functions returning pointers, declared so calls before the definition
+ * (often cross-file) do not default to int and truncate on LP64 */
+struct	tnode	*strfunc(), *lconst(), *optim(), *tnode(), *getblk(), *tconst();
+struct	tnode	*unoptim(), *lvfield(), *acommute(), *isconstant(), *hardlongs();
+struct	tnode	*sdelay(), *ncopy();
+char	*outname(), *sbrk();
+extern char	maprel[];
+extern char	notrel[];
 int	nreg;
 int	isn;
 int	namsiz;
 int	line;
 int	nerror;
-struct	table	cctab[];
-struct	table	efftab[];
-struct	table	regtab[];
-struct	table	sptab[];
+extern struct	table	cctab[];
+extern struct	table	efftab[];
+extern struct	table	regtab[];
+extern struct	table	sptab[];
 struct	table	lsptab[1];
-struct	instab	instab[];
-struct	instab	branchtab[];
-int	opdope[];
-char	*opntab[];
+extern struct	instab	instab[];
+extern struct	instab	branchtab[];
+extern int	opdope[];
+extern char	*opntab[];
 int	nstack;
 int	nfloat;
 struct	tname	sfuncr;

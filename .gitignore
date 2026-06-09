@@ -1,3 +1,7 @@
 usr
 *.o
 cpp/cpy.c
+c1/table.i
+c1/table.c
+c1/cvopt
+c1/mktab

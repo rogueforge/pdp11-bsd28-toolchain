@@ -156,19 +156,19 @@ l1:
 			goto l1;
 
 		case 'S':
-			t =+ 2;
+			t += 2;
 			goto l1;
 
 		case 'C':
-			t =+ 4;
+			t += 4;
 			goto l1;
 
 		case '1':
-			t =+ 8;
+			t += 8;
 			goto l1;
 
 		case '2':
-			t =+ 16;
+			t += 16;
 			goto l1;
 		}
 		ungetc(c, stdin);
@@ -245,7 +245,7 @@ loop1:
 			m = 63;
 pf:
 			if ((c=getchar())=='*')
-				m =+ 0100; else
+				m += 0100; else
 				ungetc(c, stdin);
 			fprintf(curbuf, ".byte %o,%o", m, t);
 			goto loop1;
@@ -347,7 +347,7 @@ l1:
 		goto l1;
 
 	case 'p':
-		f =+ 16;
+		f += 16;
 		goto l1;
 	}
 	ungetc(c, stdin);
