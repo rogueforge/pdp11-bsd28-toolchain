@@ -189,6 +189,7 @@ long term(segp) int *segp; {
 	exsym=0; *segp=SABS;
 	if(t=='-'){ v=term(segp); return -v; }
 	if(t=='~'){ v=term(segp); return ~v; }
+	if(t=='!'){ v=term(segp); return ~v; }	/* 2BSD as: unary one's complement */
 	if(t=='('){ v=expr(segp); if(lex()!=')')aerror("missing )"); return v; }
 	if(t==TNUM) return tokval;
 	if(t==TID){
@@ -294,7 +295,14 @@ struct operand *o;
 		t=lex(); reg=regof(); if(reg<0){aerror("bad register");reg=0;}
 		if(lex()!=')')aerror("missing )");
 		if(peek()=='+'){ lex(); o->mode=(defer?3:2)*010+reg; }
-		else o->mode=(defer?3:1)*010+reg;	/* *(rn)=mode3 ; (rn)=mode1 */
+		else if(defer){
+			/* *(rn) means M[M[rn]] with NO side effect.  There is no
+			 * single-word mode for that; it is mode 7 (index deferred)
+			 * with a zero index word -- *0(rn).  Encoding it as mode 3
+			 * (@(rn)+) wrongly auto-increments rn (corrupted putc). */
+			o->mode=7*010+reg; o->hasx=1; o->xval=0; o->xseg=SABS;
+		}
+		else o->mode=1*010+reg;			/* (rn) = mode 1 = M[rn] */
 		return;
 	}
 	if(t=='-' && peek()=='('){
@@ -379,6 +387,7 @@ void assemble()
 		if(t==TEOF) break;
 		if(t==TNL){ lineno++; continue; }
 		if(t==';') continue;
+		if(t==TSTR){ int i; for(i=0;i<tokslen;i++) emitbyte(tokstr[i]); continue; }  /* bare string = .ascii */
 		if(t==TID){
 			char name[64]; struct op*kw; int t2;
 			strcpy(name,tokname); kw=tokkw;
@@ -395,7 +404,14 @@ void assemble()
 			/* assignment?  name = expr  */
 			if(t2=='='){
 				int seg; long v; v=expr(&seg);
-				if(strcmp(name,".")!=0){ struct sym*sp=lookup(name); sp->flags|=SF_DEF; sp->seg=seg; sp->value=v; }
+				if(strcmp(name,".")==0){
+					/* set the location counter.  `.=.+N' reserves N bytes
+					 * (e.g. the uninitialised tail of a partly-initialised
+					 * array); emit zero fill so following data isn't placed
+					 * on top of the reserved space. */
+					while(dot[curseg] < v) emitbyte(0);
+					if(dot[curseg] > v) dot[curseg]=v;	/* backward (rare) */
+				} else { struct sym*sp=lookup(name); sp->flags|=SF_DEF; sp->seg=seg; sp->value=v; }
 				continue;
 			}
 			unlex();		/* push t2 back: it starts the operands/expression */

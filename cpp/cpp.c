@@ -1123,7 +1123,11 @@ main(argc,argv)
 					static char _sobuf[BUFSIZ];	/* own buffer (old libc exported _sobuf) */
 					if (NULL==(fout=fopen(argv[i], "w"))) {
 						pperror("Can't create %s", argv[i]); exit(8);
-					} else {fclose(stdout); setbuf(fout,_sobuf);}
+					/* setbuf() would tell stdio _sobuf is BUFSIZ bytes, but on
+				 * the host that is glibc's 8192, not cpp's 512 -- stdio
+				 * then overruns the 512-byte _sobuf and corrupts the output
+				 * (4 NULs at the 512 boundary).  Give the size explicitly. */
+				} else {fclose(stdout); setvbuf(fout,_sobuf,_IOFBF,sizeof _sobuf);}
 # endif
 				} else pperror("extraneous name %s", argv[i]);
 			}

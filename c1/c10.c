@@ -873,7 +873,8 @@ struct table *table;
 			*treep = p = optim(p);
 		p1 = p->tr1;
 	}
-	if (p1->op==NAME) switch(p->op) {
+	if (p1 && p1->op==NAME) switch(p->op) {	/* p1 (tr1) may be NULL; the
+				 * PDP-11 read address 0 (!=NAME) harmlessly here */
 		case ASLSH:
 		case ASRSH:
 		case ASSIGN:
