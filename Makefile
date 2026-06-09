@@ -38,7 +38,7 @@ dirs:
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
 #  exists so it can be verified end to end.)
-tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool cc-tool
+tools: dirs binutils cpp-tool c0-tool c1-tool c2-tool as-tool cc-tool
 
 # ---------------------------------------------------------------------
 # Binary utilities (single .c file each)
@@ -165,6 +165,21 @@ c2/c21.o: c2/c21.c c2/c2.h; ${HOSTCC} ${C2FLAGS} -c -o $@ c2/c21.c
 # yet ported), so those report the missing tool.
 # ---------------------------------------------------------------------
 
+# ---------------------------------------------------------------------
+# as -- PDP-11 assembler, reimplemented in C (the 2BSD as is pure PDP-11
+# assembly).  Accepts 2BSD syntax, emits classic 2.8BSD a.out.  The opcode
+# table (as/optab.h) is the authentic table from as19.s.
+# ---------------------------------------------------------------------
+
+as-tool: ${BIN}/${PREFIX}-as
+
+${BIN}/${PREFIX}-as: as/as.c as/optab.h
+	${HOSTCC} ${O} ${COMPAT} -Ias -o $@ as/as.c
+
+# ---------------------------------------------------------------------
+# cc -- compiler driver.
+# ---------------------------------------------------------------------
+
 cc-tool: ${BIN}/${PREFIX}-cc
 
 ${BIN}/${PREFIX}-cc: cc/cc.c
@@ -192,4 +207,4 @@ clean:
 distclean: clean
 	rm -f ${BIN}/${PREFIX}-nm ${BIN}/${PREFIX}-size \
 	      ${BIN}/${PREFIX}-strip ${BIN}/${PREFIX}-cpp ${BIN}/${PREFIX}-c0 \
-	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-cc
+	      ${BIN}/${PREFIX}-c1 ${BIN}/${PREFIX}-c2 ${BIN}/${PREFIX}-as ${BIN}/${PREFIX}-cc

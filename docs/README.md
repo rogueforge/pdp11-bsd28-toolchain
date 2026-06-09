@@ -20,7 +20,7 @@ source.c ─cpp─▶ ─c0─▶ ─c1─▶ [c2] ─as─▶ file.o ─ld─�
 | [c0.md](c0.md) | `c0` | compiler pass 1 (parser) | done |
 | [c1.md](c1.md) | `c1` + codegen table | compiler pass 2 (PDP-11 codegen) | done |
 | [c2.md](c2.md) | `c2` | peephole optimizer | builds; optimizer not yet reliable |
-| _(pending)_ | `as` | assembler (C reimplementation) | todo |
+| [as.md](as.md) | `as` | assembler (C reimplementation) | core works; numeric local labels todo |
 | _(pending)_ | `ld` | link editor | todo |
 | [cc.md](cc.md) | `cc` | compiler driver | -S works; -c/-o need as/ld |
 
