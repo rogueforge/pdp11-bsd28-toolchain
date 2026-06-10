@@ -7,7 +7,10 @@ sources. Sibling project to `~/vax-bsd42-toolchain`, but the compiler is
 
 ## Source origin
 
-All sources imported unmodified from `~/bsd/2.8/usr/kernel/src`:
+The authentic 2.8BSD sources below are **vendored in this repository** — the
+build (`make all && make test`) depends on nothing outside the tree.  The
+paths are recorded only for provenance: where each file was originally
+imported from (unmodified), under 2.8BSD `usr/kernel/src`:
 
 - `cmd/cc.c`            -> `cc/`
 - `cmd/cpp/*`          -> `cpp/`
@@ -129,9 +132,13 @@ See the session task list. Order of attack:
 9. minimal libc + crt0
 10. hello.c -> runnable a.out (first milestone)
 
-## Reference assets on this machine
+## Development-time references (NOT build dependencies)
 
-- `~/bsd/2.8/usr/kernel/src` — full 2.8BSD system source (pristine).
-- `~/bsd/2.9/usr/src/cmd/{c,as,cpp,ld}` — 2.9BSD equivalents (cross-ref).
-- `~/pdp11-tools` — GNU binutils 2.43 pdp11-aout (as/ld/ar/nm) — oracle only.
-- `~/vax-bsd42-toolchain` — the sibling project this one mirrors.
+These were used only while porting — to cross-check behaviour and trace
+provenance.  None is required to build, test, or run this toolchain; the repo
+is self-contained.
+
+- 2.8BSD `usr/kernel/src` — full 2.8BSD system source (pristine), the import origin.
+- 2.9BSD `usr/src/cmd/{c,as,cpp,ld}` — 2.9BSD equivalents (cross-ref).
+- GNU binutils 2.43 `pdp11-aout` (as/ld/ar/nm) — disassembly oracle only.
+- `vax-bsd42-toolchain` — the sibling project this one mirrors.
