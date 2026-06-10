@@ -137,6 +137,10 @@ static char *nearestlabel(int val, int seg, int *base)
 	int i, best=-1;
 	for(i=0;i<NSym;i++){
 		if(BASETYPE(Sym[i].type)!=seg || !Sym[i].name[0]) continue;
+		/* a text symbol at an odd address sits mid-instruction and cannot be
+		 * given a label (text has no byte split); anchor to an even one instead,
+		 * so an odd pointer comes out `evensym+1' rather than an undefined name */
+		if(seg==N_TEXT && (Sym[i].value&1)) continue;
 		if((Sym[i].value&0xffff)>(val&0xffff)) continue;
 		if(best<0 || Sym[i].value>Sym[best].value
 		   || (Sym[i].value==Sym[best].value && ISEXT(Sym[i].type))) best=i;
