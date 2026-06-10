@@ -7,6 +7,9 @@
 # exported by run.sh.  A test fails (exits nonzero) on the first failed
 # check.
 
+# Optimisation flags for cc compiles (run.sh re-runs correctness tests with -O).
+: "${CCOPT:=}"
+
 fail() { echo "  $*"; exit 1; }
 
 # check_eq LABEL EXPECTED ACTUAL

@@ -102,8 +102,27 @@ run_sh_tests() {
 	done
 }
 
+# second pass: re-run the cc correctness tests with the c2 optimizer on (-O),
+# via the CCOPT env var those tests honour.  Verifies every program behaves
+# identically optimised and not -- so the suite covers both -O and plain.
+run_opt_tests() {
+	for t in programs endtoend printf; do
+		f="$ROOT/tests/cc/$t.sh"
+		[ -e "$f" ] || continue
+		name="cc/$t [-O]"
+		match "$name" || continue
+		out=`CCOPT=-O sh "$f" 2>&1`
+		if [ $? -eq 0 ]; then
+			report_pass "$name"
+		else
+			report_fail "$name" "$out"
+		fi
+	done
+}
+
 run_cpp_tests
 run_sh_tests
+run_opt_tests
 
 echo "------------------------------------------------------------"
 if [ $UPDATE -eq 1 ]; then

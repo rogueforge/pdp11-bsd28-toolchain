@@ -12,7 +12,7 @@ trap 'rm -rf "$tmp"' EXIT
 prog_test() {
 	name="$1"; sym="$2"; src="$3"
 	printf '%s\n' "$src" > "$tmp/$name.c"
-	( cd "$tmp" && "$BIN-cc" -c "$name.c" ) 2>"$tmp/$name.err" \
+	( cd "$tmp" && "$BIN-cc" $CCOPT -c "$name.c" ) 2>"$tmp/$name.err" \
 		|| fail "$name: cc -c failed: `cat \"$tmp/$name.err\"`"
 	test -f "$tmp/$name.o" || fail "$name: no object produced"
 	check_contains "$name global $sym" "`\"$BIN-nm\" \"$tmp/$name.o\"`" "T $sym"
@@ -32,7 +32,7 @@ int main(){ return fib(10); }'
 # (guards against the uninitialised-memory regressions we fixed)
 i=0
 while [ $i -lt 5 ]; do
-	( cd "$tmp" && "$BIN-cc" -c forloop.c ) 2>/dev/null || fail "non-deterministic compile failure"
+	( cd "$tmp" && "$BIN-cc" $CCOPT -c forloop.c ) 2>/dev/null || fail "non-deterministic compile failure"
 	i=`expr $i + 1`
 done
 

@@ -38,4 +38,15 @@ EOF
 ( cd "$tmp" && "$BIN-cc" -O p.c -o p ) || fail "cc -O p.c failed"
 check_eq "printf -O output" "opt 42 ok ff 100 -7" "`"$SIM" "$tmp/p" 2>/dev/null`"
 
+# c2 must run cleanly and emit assemblable output.  cc silently falls back to
+# the unoptimised c1 output when c2 fails, so a c2 crash would be invisible
+# through `cc -O' alone -- invoke c2 directly here.  Recursion (fib) is the
+# case whose call-return `mov%c' NUL once crashed c2.
+cat > "$tmp/r.c" <<'EOF'
+int fib(n)int n;{return n<2?n:fib(n-1)+fib(n-2);}int main(){return fib(10);}
+EOF
+( cd "$tmp" && "$BIN-cc" -S r.c )             || fail "cc -S r.c failed (c1 output)"
+"$BIN-c2" "$tmp/r.s" "$tmp/r.opt.s"           || fail "c2 crashed/failed on r.s"
+( cd "$tmp" && "$BIN-as" -o r.opt.o r.opt.s ) || fail "c2 output does not assemble"
+
 exit 0
