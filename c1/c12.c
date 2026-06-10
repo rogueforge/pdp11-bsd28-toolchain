@@ -525,15 +525,19 @@ struct tnode *atree;
 			return(tree);
 		}
 		/*
-		 * PDP-11 FP negation
+		 * FP negation -- negate the host double directly.  The original
+		 * flipped bit 15 of word 0 of fvalue: the sign bit on the PDP-11
+		 * (the sign/exponent word is stored first), but a low-mantissa bit
+		 * on the host's little-endian IEEE double, which silently corrupted
+		 * negative float constants.
 		 */
 		if (subtre->op==SFCON) {
 			subtre->value ^= 0100000;
-			((short *)&subtre->fvalue)[0] ^= 0100000;
+			subtre->fvalue = -subtre->fvalue;
 			return(subtre);
 		}
 		if (subtre->op==FCON) {
-			((short *)&subtre->fvalue)[0] ^= 0100000;
+			subtre->fvalue = -subtre->fvalue;
 			return(subtre);
 		}
 	}

@@ -347,6 +347,22 @@ void doublop(base){ struct operand s,d; getop(&s); if(lex()!=',')aerror("missing
 void singlop(base){ struct operand d; getop(&d); emitword(base|(d.mode&077),SABS,0,0); putop(&d); }
 void jsrop(base){ struct operand r,d; getop(&r); if(lex()!=',')aerror("missing ,"); getop(&d);
 	emitword(base|((r.mode&07)<<6)|(d.mode&077),SABS,0,0); putop(&d); }
+/* FP11 floating-point operand forms.  A float accumulator (ac0-ac3, written
+ * r0-r3) lands in bits 6-7; the other operand is a general addressing mode in
+ * bits 0-5 (with its extra word, if any). */
+void flop14(base){ struct operand s,d;	/* `op fsrc,freg' (addf/cmpf/movof/...) */
+	getop(&s); if(lex()!=',')aerror("missing ,"); getop(&d);
+	emitword(base|((d.mode&07)<<6)|(s.mode&077),SABS,0,0); putop(&s); putop(&d); }
+void flop5(base){ struct operand s,d;	/* `op freg,dst' (movfo/movfi/movei) */
+	getop(&s); if(lex()!=',')aerror("missing ,"); getop(&d);
+	emitword(base|((s.mode&07)<<6)|(d.mode&077),SABS,0,0); putop(&s); putop(&d); }
+void movfop(base){ struct operand s,d;	/* movf: LDF mem,freg | STF freg,mem */
+	getop(&s); if(lex()!=',')aerror("missing ,"); getop(&d);
+	if((s.mode&077) < 4)		/* source is a float register -> STF */
+		emitword(0174000|((s.mode&07)<<6)|(d.mode&077),SABS,0,0);
+	else				/* source is memory -> LDF */
+		emitword(base|((d.mode&07)<<6)|(s.mode&077),SABS,0,0);
+	putop(&s); putop(&d); }
 void rtsop(base){ struct operand r; getop(&r); emitword(base|(r.mode&07),SABS,0,0); }
 void sysop(base){ int seg; long v=expr(&seg); emitword(base|(v&077),SABS,0,0); }
 void branchop(base){ int seg; long v=expr(&seg); long off=(v-(dot[curseg]+2))/2;
@@ -421,6 +437,9 @@ void assemble()
 					  emitword(kw->opcode,SABS,0,0); break;
 				case 013: doublop(kw->opcode); break;
 				case 015: singlop(kw->opcode); break;
+				case 05:  flop5(kw->opcode); break;   /* movfo freg,dst */
+				case 012: movfop(kw->opcode); break;  /* movf (ld/st) */
+				case 014: flop14(kw->opcode); break;  /* addf fsrc,freg */
 				case 07:  if(strcmp(name,"xor")==0){ /* xor: src,reg like jsr fields */
 						struct operand s,d; getop(&s); if(lex()!=',')aerror(",");
 						getop(&d); emitword(kw->opcode|((d.mode&07)<<6)|(s.mode&077),SABS,0,0); putop(&s);

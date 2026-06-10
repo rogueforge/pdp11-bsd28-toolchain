@@ -8,8 +8,49 @@ static	char	sccsid[] = "@(#)c10.c	2.2";	/*	SCCS id keyword	*/
 */
 
 #include "c1.h"
+#include <math.h>
 
 #define	dbprint(op)	/* */
+
+/*
+ * Convert a host double to PDP-11 DEC floating-point words, high-order word
+ * first (the sign/exponent word is stored at the lowest address).  dbl=1 ->
+ * D format (4 words, 64-bit); dbl=0 -> F format (2 words, 32-bit).
+ *
+ * c1 runs on the LP64 host: the original code emitted ((short*)&fvalue)[0..3],
+ * i.e. the host's IEEE-754 bytes, which are NOT the PDP-11 float format the
+ * FP11 (and apsim) expect.  DEC F/D: value = (-1)^S * (0.5 + frac/2^56) *
+ * 2^(E-128), with an 8-bit excess-128 exponent and a hidden leading 1/2.
+ */
+void
+decfloat(double v, int dbl, unsigned short *w)
+{
+	int i, nw = dbl ? 4 : 2, s = 0, e;
+	double m;
+	unsigned long long bits, frac;
+
+	for (i = 0; i < 4; i++)
+		w[i] = 0;
+	if (v == 0)
+		return;
+	if (v < 0) { s = 1; v = -v; }
+	m = frexp(v, &e);		/* v = m * 2^e, 0.5 <= m < 1 */
+	e += 128;			/* DEC excess-128 bias */
+	if (e <= 0)			/* underflow */
+		return;
+	if (e > 0377)			/* overflow -> clamp to max */
+		e = 0377;
+	frac = (unsigned long long)((m - 0.5) * 72057594037927936.0 + 0.5); /* *2^56 */
+	bits = ((unsigned long long)s << 63)
+	     | ((unsigned long long)(e & 0377) << 55)
+	     | (frac & 0x7FFFFFFFFFFFFFULL);
+	if (!dbl) {			/* F: round to and keep the top 32 bits */
+		bits += 0x80000000ULL;
+		bits &= ~0xFFFFFFFFULL;
+	}
+	for (i = 0; i < nw; i++)
+		w[i] = (unsigned short)(bits >> (16 * (3 - i)));
+}
 #ifdef	DEBUG
 #define	dbprint(op)	printf("	/ %s", opntab[op])
 #endif
@@ -511,21 +552,20 @@ struct table *table;
 	string = opt->tabstring;
 	p1 = tree->tr1;
 	if (p1->op==FCON && p1->value>0) {
-		/* emit the four 16-bit words of the constant explicitly; the
-		 * original passed the double through printf as four stack words
-		 * (NOTE: host words are IEEE, not PDP-11 float format) */
+		unsigned short w[4];		/* D-format (4 words) PDP-11 const */
+		decfloat(p1->fvalue, 1, w);
 		printf(".data\nL%d:%o;%o;%o;%o\n.text\n", p1->value,
-			((unsigned short *)&p1->fvalue)[0], ((unsigned short *)&p1->fvalue)[1],
-			((unsigned short *)&p1->fvalue)[2], ((unsigned short *)&p1->fvalue)[3]);
+			w[0], w[1], w[2], w[3]);
 		p1->value = -p1->value;
 	}
 	p2 = 0;
 	if (opdope[tree->op]&BINARY) {
 		p2 = tree->tr2;
 		if (p2->op==FCON && p2->value>0) {
+			unsigned short w[4];
+			decfloat(p2->fvalue, 1, w);
 			printf(".data\nL%d:%o;%o;%o;%o\n.text\n", p2->value,
-				((unsigned short *)&p2->fvalue)[0], ((unsigned short *)&p2->fvalue)[1],
-				((unsigned short *)&p2->fvalue)[2], ((unsigned short *)&p2->fvalue)[3]);
+				w[0], w[1], w[2], w[3]);
 			p2->value = -p2->value;
 		}
 	}
@@ -1200,10 +1240,14 @@ struct tnode *atree;
 		} else
 			goto illinit;
 		if (type==FLOAT) {
-			sfval = fval;
-			printf("%o; %o\n", sfval);
-		} else
-			printf("%o; %o; %o; %o\n", fval);
+			unsigned short w[2];	/* F-format (single) initializer */
+			decfloat(fval, 0, w);
+			printf("%o; %o\n", w[0], w[1]);
+		} else {
+			unsigned short w[4];	/* D-format (double) initializer */
+			decfloat(fval, 1, w);
+			printf("%o; %o; %o; %o\n", w[0], w[1], w[2], w[3]);
+		}
 		return;
 
 	case LONG:

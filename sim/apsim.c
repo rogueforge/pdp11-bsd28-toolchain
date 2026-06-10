@@ -15,6 +15,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <math.h>
 
 static unsigned char M[1<<16];
 static unsigned short R[8];		/* R6=sp, R7=pc */
@@ -23,10 +24,50 @@ static unsigned short R[8];		/* R6=sp, R7=pc */
 static int FN, FZ, FV, FC;		/* condition codes */
 static int halted, ecode, trace;
 
+/* ---- FP11 floating-point unit ---------------------------------------
+ * 6 accumulators held as host doubles, plus the FP status register.  Floats
+ * live in memory in DEC F (32-bit) / D (64-bit) format -- NOT IEEE -- so the
+ * conversion routines below translate to/from host double on every load and
+ * store.  c1 runs everything in D mode (it emits the `fltused' convention
+ * rather than an explicit setd), so the FPS defaults to double precision. */
+static double AC[6];
+static int FPS = 0200;			/* bit 0200 = double mode, 0100 = long int */
+#define FPD 0200
+#define FPL 0100
+static int fN, fZ, fV, fC;		/* FP condition codes (cfcc copies to CPU) */
+
 static int ld2(int a){ a&=0xffff; return M[a] | (M[(a+1)&0xffff]<<8); }
 static void st2(int a,int v){ a&=0xffff; M[a]=v&0xff; M[(a+1)&0xffff]=(v>>8)&0xff; }
 static int ld1(int a){ return M[a&0xffff]; }
 static void st1(int a,int v){ M[a&0xffff]=v&0xff; }
+
+/* Read a DEC float at `addr' (dbl ? D:4 words : F:2 words) -> host double.
+ * The sign/exponent word is at the lowest address; value =
+ * (-1)^S * (0.5 + frac/2^56) * 2^(E-128), 8-bit excess-128 exponent. */
+static double rdfloat(int addr, int dbl){
+	unsigned long long bits=0; int i, nw=dbl?4:2, s, e;
+	unsigned long long f;
+	for(i=0;i<nw;i++) bits=(bits<<16)|ld2((addr+2*i)&0xffff);
+	if(!dbl) bits<<=32;			/* left-justify F into 64 bits */
+	s=(bits>>63)&1; e=(bits>>55)&0377; f=bits&0x7FFFFFFFFFFFFFULL;
+	if(e==0) return 0.0;			/* DEC zero (and "undefined") */
+	{ double m=0.5+(double)f/72057594037927936.0, v=ldexp(m, e-128);
+	  return s?-v:v; }
+}
+/* Write host double `v' as a DEC float at `addr' (dbl ? D : F). */
+static void wrfloat(int addr, double v, int dbl){
+	int i, nw=dbl?4:2, s=0, e; double m; unsigned long long bits, frac;
+	if(v==0){ for(i=0;i<nw;i++) st2((addr+2*i)&0xffff,0); return; }
+	if(v<0){ s=1; v=-v; }
+	m=frexp(v,&e); e+=128;
+	if(e<=0){ for(i=0;i<nw;i++) st2((addr+2*i)&0xffff,0); return; }
+	if(e>0377) e=0377;
+	frac=(unsigned long long)((m-0.5)*72057594037927936.0+0.5);
+	bits=((unsigned long long)s<<63)|((unsigned long long)(e&0377)<<55)
+	    |(frac&0x7FFFFFFFFFFFFFULL);
+	if(!dbl){ bits+=0x80000000ULL; bits&=~0xFFFFFFFFULL; }
+	for(i=0;i<nw;i++) st2((addr+2*i)&0xffff, (bits>>(16*(3-i)))&0xFFFF);
+}
 
 /* ---- operand resolution ---------------------------------------------
  * Resolve a 6-bit mode|reg field to a "location": a register (ISREG|n) or
@@ -151,6 +192,77 @@ static int cond(int instr){		/* branch taken? */
 	return -1;				/* not a branch */
 }
 
+/* FP11 floating-point instruction (017xxxx).  AC[ac] is the accumulator in
+ * bits 6-7; bits 0-5 are a source/dest operand (a float accumulator when the
+ * mode is register-direct, else a float/int in memory).  Memory floats use
+ * the current FPS precision, except the convert forms (movof/movfo) which use
+ * the OTHER precision.  c1 only ever uses ac0/ac1 and non-autoincrement modes. */
+static double fp_get(int spec, int dbl){	/* float source operand */
+	if(((spec>>3)&7)==0) return AC[spec&7];
+	return rdfloat(operand(spec,0), dbl);
+}
+static void fp_put(int spec, double v, int dbl){	/* float dest operand */
+	if(((spec>>3)&7)==0){ AC[spec&7]=v; return; }
+	wrfloat(operand(spec,0), v, dbl);
+}
+static void fp_setcc(double v){ fN=v<0; fZ=v==0; fV=0; fC=0; }
+
+static void do_fp(int instr){
+	int op=instr&0177400, ac=(instr>>6)&3, spec=instr&077;
+	int isreg=((spec>>3)&7)==0, reg=spec&7, dbl=(FPS&FPD)?1:0;
+	double sv; int addr; long iv;
+
+	switch(instr){				/* no-operand / mode control */
+	case 0170000: FN=fN; FZ=fZ; FV=fV; FC=fC; return;	/* cfcc */
+	case 0170001: FPS&=~FPD; return;			/* setf */
+	case 0170011: FPS|= FPD; return;			/* setd */
+	case 0170002: FPS&=~FPL; return;			/* seti */
+	case 0170012: FPS|= FPL; return;			/* setl */
+	}
+	/* single-operand ops + ldfps/stfps: the opcode is bits 15-6 (no AC
+	 * field), so they must be matched with the 0177700 mask -- clrf/tstf/
+	 * absf/negf differ only in bits 7-6, which 0177400 would drop. */
+	switch(instr&0177700){
+	case 0170100: FPS=isreg?R[reg]:ld2(operand(spec,0)); return;	/* ldfps */
+	case 0170200: if(isreg)R[reg]=FPS; else st2(operand(spec,0),FPS); return; /* stfps */
+	case 0170400:	/* clrf */
+		fp_put(spec,0.0,dbl); fN=0; fZ=1; fV=0; fC=0; return;
+	case 0170500:	/* tstf */
+		fp_setcc(fp_get(spec,dbl)); return;
+	case 0170600:	/* absf */
+		sv=fp_get(spec,dbl); if(sv<0)sv=-sv; fp_put(spec,sv,dbl); fp_setcc(sv); return;
+	case 0170700:	/* negf */
+		sv=-fp_get(spec,dbl); fp_put(spec,sv,dbl); fp_setcc(sv); return;
+	}
+	/* two-operand ops: opcode bits 15-8, AC in bits 7-6 */
+	switch(op){
+	case 0171000: AC[ac]*=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* mulf */
+	case 0172000: AC[ac]+=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* addf */
+	case 0173000: AC[ac]-=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* subf */
+	case 0174400: AC[ac]/=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* divf */
+	case 0173400: fp_setcc(fp_get(spec,dbl)-AC[ac]); return;		/* cmpf: CC from (fsrc-AC) */
+	case 0172400: AC[ac]=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* movf LDF */
+	case 0174000: fp_put(spec,AC[ac],dbl); fp_setcc(AC[ac]); return;	/* movf STF */
+	case 0177400: AC[ac]=fp_get(spec,!dbl); fp_setcc(AC[ac]); return;	/* movof (load cvt) */
+	case 0176000: fp_put(spec,AC[ac],!dbl); fp_setcc(AC[ac]); return;	/* movfo (store cvt) */
+	case 0177000:	/* movif: int -> float */
+		if(isreg) iv=(short)R[reg];
+		else { addr=operand(spec,0);
+		       iv=(FPS&FPL)? (int)((ld2(addr)<<16)|ld2((addr+2)&0xffff))
+				   : (short)ld2(addr); }
+		AC[ac]=(double)iv; fp_setcc(AC[ac]); return;
+	case 0175400:	/* movfi: float -> int */
+		iv=(long)AC[ac];
+		if(isreg) R[reg]=iv&0xffff;
+		else { addr=operand(spec,0);
+		       if(FPS&FPL){ st2(addr,(iv>>16)&0xffff); st2((addr+2)&0xffff,iv&0xffff); }
+		       else st2(addr,iv&0xffff); }
+		fN=AC[ac]<0; fZ=AC[ac]==0; fV=0; fC=0; return;
+	}
+	fprintf(stderr,"apsim: unhandled fp instr %06o at %06o\n", instr, (PC-2)&0xffff);
+	halted=1; ecode=127;
+}
+
 static void step(void)
 {
 	int instr=ld2(PC), op, byte, s, d, sv, dv, r, sl, dl;
@@ -168,6 +280,9 @@ static void step(void)
 
 	op=(instr>>12)&017;
 	byte=(op>=011 && op<=015);		/* MOVB..BISB carry bit 15 */
+
+	/* FP11 floating-point group (017xxxx) */
+	if(op==017){ do_fp(instr); return; }
 
 	/* double-operand: MOV1 CMP2 BIT3 BIC4 BIS5 ADD6 ; +010 byte ; 016=SUB */
 	if((op>=1&&op<=6)||(op>=011&&op<=016)){
