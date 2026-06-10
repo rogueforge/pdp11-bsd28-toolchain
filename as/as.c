@@ -192,6 +192,7 @@ long term(segp) int *segp; {
 	if(t=='~'){ v=term(segp); return ~v; }
 	if(t=='!'){ v=term(segp); return ~v; }	/* 2BSD as: unary one's complement */
 	if(t=='('){ v=expr(segp); if(lex()!=')')aerror("missing )"); return v; }
+	if(t=='['){ v=expr(segp); if(lex()!=']')aerror("missing ]"); return v; }	/* 2BSD as: [] grouping */
 	if(t==TNUM) return tokval;
 	if(t==TID){
 		if(strcmp(tokname,".")==0){ *segp=curseg+1; return dot[curseg]; }
