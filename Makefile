@@ -37,11 +37,15 @@ dirs:
 
 # Target (PDP-11) system headers, installed to usr/include where cpp's
 # getincdir() finds them (resolved relative to the cpp binary, the same
-# scheme cc/ld use) -- mirrors the vax project's `headers' target.
-STD_HDRS = stdio.h
-
+# scheme cc/ld use) -- mirrors the vax project's `headers' target.  The full
+# authentic 2.8BSD header set lives in include/ (and include/sys/); install it
+# all so the libc sources find <ctype.h>, <errno.h>, <signal.h>, <sys/...>,
+# etc. instead of leaking to the host's /usr/include.
 headers: dirs
-	for f in ${STD_HDRS}; do cp include/$$f ${INC}/$$f; done
+	mkdir -p ${INC}/sys
+	for f in include/*.h;     do cp -f $$f ${INC}/;     done
+	for f in include/sys/*.h; do cp -f $$f ${INC}/sys/; done
+	chmod -R u+w ${INC}
 
 # Implemented so far.  More are appended as passes are ported.
 # (ld is a larger port -- see NOTES.md -- and is added once the assembler
@@ -228,50 +232,66 @@ ${BIN}/${PREFIX}-cc: cc/cc.c
 	${HOSTCC} ${O} ${COMPAT} -Icross -o $@ cc/cc.c
 
 # ---------------------------------------------------------------------
-# libc + crt0 -- the authentic 2.8BSD startup (crt0/csv) and C-library
-# syscall stubs, assembled by our as (with the syscall-number header
-# prepended) and archived by our ar into usr/lib/libc.a.  crt0.o is
-# installed separately (cc links it explicitly).  Members are listed in
-# dependency order (referencer before definer) because this ld scans a
-# plain archive single-pass; a ranlib/__.SYMDEF table would remove that
-# ordering requirement.
+# libc + crt0 -- the authentic 2.8BSD C library: program startup
+# (crt0/csv/cerror), the long-arithmetic helpers c1 calls (lmul/ldiv/...),
+# the gen/ string-memory-numeric-util routines, buffered stdio (printf plus
+# fopen/fgets/fputs/getc/putc/ungetc/fseek/...), and the sys/ syscall stubs.
+# C sources go through our cc; .s through our as (syscall stubs get the
+# syscall-number header prepended).  ranlib builds the __.SYMDEF table so the
+# archive members can be in any order.  crt0.o is installed separately (cc
+# links it explicitly).  Floating-point printing, the varargs sprintf/scanf
+# family, the passwd/group database, networking, and the overlay/profiling
+# build variants are out of scope (see NOTES.md).
 # ---------------------------------------------------------------------
 ASM  = ${BIN}/${PREFIX}-as
 CC   = ${BIN}/${PREFIX}-cc
 LSYS = libc/include/sys.s
 
+# gen/ C sources (string, memory, numeric, char-class, small utilities)
+LIBC_GENC = strcmp strlen strcpy strcat strncmp strncpy strncat index rindex \
+	    atoi atol abs ctype_ getenv mktemp perror errlst qsort swab isatty \
+	    isapipe stty sleep malloc
+# stdio/ C sources (the full buffered-I/O layer minus float/varargs/db)
+LIBC_STDIOC = printf fprintf data strout flsbuf fputc fopen freopen fdopen \
+	      fgets fputs fgetc getchar putchar puts gets ungetc fseek ftell rew \
+	      setbuf clrerr filbuf findiop endopen rdwr getw putw
+# sys/ syscall stubs (assembled with the sys.s number defs)
+LIBC_SYS = write read open close creat lseek exit sbrk unlink fstat stat lstat \
+	   dup pipe fork wait getpid getuid getgid setuid setgid access chmod \
+	   chown chdir link kill ioctl umask time stime sync alarm pause nice \
+	   times mknod chroot execv execl
+# crt/ long-arithmetic + profiler-counter helpers (c1 emits calls to these)
+LIBC_ARITH = lmul ldiv lrem almul aldiv alrem mcount
+
+# Full object list for the archive (with directory prefixes).
+LIBC_OBJS = $(addprefix libc/gen/,$(addsuffix .o,${LIBC_GENC})) \
+	    libc/gen/cuexit.o libc/gen/setjmp.o libc/gen/abort.o \
+	    $(addprefix libc/stdio/,$(addsuffix .o,${LIBC_STDIOC})) \
+	    libc/stdio/doprnt.o libc/stdio/fltstub.o \
+	    $(addprefix libc/sys/,$(addsuffix .o,${LIBC_SYS})) \
+	    libc/crt/csv.o libc/crt/cerror.o \
+	    $(addprefix libc/crt/,$(addsuffix .o,${LIBC_ARITH}))
+
 libc: as-tool ar-tool ranlib-tool cc-tool headers dirs
 	${ASM} -o ${LIB}/crt0.o ${LSYS} libc/csu/crt0.s
-	${ASM} -o libc/csv.o      libc/crt/csv.s
-	${ASM} -o libc/cerror.o   ${LSYS} libc/crt/cerror.s
-	${ASM} -o libc/cuexit.o   ${LSYS} libc/gen/cuexit.s
-	${ASM} -o libc/write.o    ${LSYS} libc/sys/write.s
-	${ASM} -o libc/read.o     ${LSYS} libc/sys/read.s
-	${ASM} -o libc/open.o     ${LSYS} libc/sys/open.s
-	${ASM} -o libc/close.o    ${LSYS} libc/sys/close.s
-	${ASM} -o libc/creat.o    ${LSYS} libc/sys/creat.s
-	${ASM} -o libc/lseek.o    ${LSYS} libc/sys/lseek.s
-	${ASM} -o libc/exit.o     ${LSYS} libc/sys/exit.s
-	${ASM} -o libc/sbrk.o     ${LSYS} libc/sys/sbrk.s
-	${ASM} -o libc/unlink.o   ${LSYS} libc/sys/unlink.s
-	${ASM} -o libc/fstat.o    ${LSYS} libc/sys/fstat.s
-	# buffered stdio: authentic 2.8BSD printf/_doprnt/strout/flsbuf/data,
-	# the float-print stubs, and a minimal malloc.  flsbuf.o supplies the
-	# real _cleanup (flushes at exit), replacing the old no-op stub.
-	# (cc refuses `-o foo.o', so compile in-place via a subshell.)
-	cd libc/stdio && ${CURDIR}/${CC} -c printf.c fprintf.c data.c strout.c flsbuf.c fputc.c
-	cd libc/gen   && ${CURDIR}/${CC} -c malloc.c
-	${ASM} -o libc/stdio/doprnt.o    libc/stdio/doprnt.s
-	${ASM} -o libc/stdio/fltstub.o   libc/stdio/fltstub.s
+	# C sources (cc refuses `-o foo.o', so compile in-place via a subshell)
+	cd libc/gen   && ${CURDIR}/${CC} -c $(addsuffix .c,${LIBC_GENC})
+	cd libc/stdio && ${CURDIR}/${CC} -c $(addsuffix .c,${LIBC_STDIOC})
+	# hand-written asm in gen/ and stdio/ (cuexit does `sys exit')
+	${ASM} -o libc/gen/cuexit.o   ${LSYS} libc/gen/cuexit.s
+	${ASM} -o libc/gen/setjmp.o            libc/gen/setjmp.s
+	${ASM} -o libc/gen/abort.o             libc/gen/abort.s
+	${ASM} -o libc/stdio/doprnt.o          libc/stdio/doprnt.s
+	${ASM} -o libc/stdio/fltstub.o         libc/stdio/fltstub.s
+	# syscall stubs
+	for f in ${LIBC_SYS}; do ${ASM} -o libc/sys/$$f.o ${LSYS} libc/sys/$$f.s; done
+	# crt: csv + cerror + long arithmetic
+	${ASM} -o libc/crt/csv.o               libc/crt/csv.s
+	${ASM} -o libc/crt/cerror.o   ${LSYS} libc/crt/cerror.s
+	for f in ${LIBC_ARITH}; do ${ASM} -o libc/crt/$$f.o libc/crt/$$f.s; done
+	# archive + table of contents
 	rm -f ${LIB}/libc.a
-	${BIN}/${PREFIX}-ar rc ${LIB}/libc.a \
-		libc/cuexit.o libc/write.o libc/read.o libc/open.o \
-		libc/close.o libc/creat.o libc/lseek.o libc/exit.o \
-		libc/sbrk.o libc/unlink.o libc/fstat.o libc/csv.o \
-		libc/cerror.o \
-		libc/stdio/printf.o libc/stdio/fprintf.o libc/stdio/data.o \
-		libc/stdio/strout.o libc/stdio/flsbuf.o libc/stdio/fputc.o \
-		libc/stdio/doprnt.o libc/stdio/fltstub.o libc/gen/malloc.o
+	${BIN}/${PREFIX}-ar rc ${LIB}/libc.a ${LIBC_OBJS}
 	${BIN}/${PREFIX}-ranlib ${LIB}/libc.a
 
 # ---------------------------------------------------------------------

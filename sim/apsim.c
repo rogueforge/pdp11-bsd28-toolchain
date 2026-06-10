@@ -93,6 +93,14 @@ static void do_syscall(int num, int argaddr)
 	case 19:			/* lseek(r0=fd, a1=off, a2=whence) */
 		r = lseek(R[0], (short)a1, a2);
 		break;
+	case 10:			/* unlink(a1=path) */
+		r = unlink((char*)(M+(a1&0xffff)));
+		break;
+	case 54:			/* ioctl -- apsim has no ttys, so every ioctl
+					 * (gtty/stty via isatty) fails: isatty()==0,
+					 * stdio block-buffers and flushes at exit. */
+		r = -1;
+		break;
 	default:
 		fprintf(stderr, "apsim: unhandled sys %d\n", num);
 		halted=1; ecode=127; return;

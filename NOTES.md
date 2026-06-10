@@ -131,6 +131,39 @@ See the session task list. Order of attack:
 9. minimal libc + crt0
 10. hello.c -> runnable a.out (first milestone)
 
+## Parity with the sibling VAX toolchain (possible future work)
+
+Compared with `~/vax-bsd42-toolchain`, this project is *ahead* on the test
+suite (20 regression tests vs one inline test), the per-tool `docs/` guides,
+the `apsim` simulator, and `libucbpath` (relocatable path resolution).  The
+VAX project has these we do not:
+
+- **A much fuller libc.** This is the main gap; see "libc completion" below.
+- **lint** — the two-pass C checker + its `llib-*.ln` libraries. (2.8BSD does
+  ship `cmd/lint`; a real port, multi-week.)
+- **libcurses + libtermlib** — terminal UI / termcap. (2.8BSD has both.)
+- **Profiling startup** — `mcrt0.o`/`gcrt0.o` from `gen/mon.c` + `sys/profil`.
+- **FP startup variants** — `fcrt0.o` etc. (we stub floats, so deferred).
+- **A canonical large-program test** (the VAX tree builds `rogue`); ours could
+  use one once the libc is fuller.
+
+We deliberately do NOT mirror VAX-only items that don't apply: PCC/MIP (we use
+Ritchie cc), and the VAX `/sys` kernel tree.  Networking (inet/, net/) barely
+exists on the 2.8BSD PDP-11 and is out of scope.
+
+### libc completion status
+
+`libc.a` now carries the practical core of the authentic 2.8BSD libc: program
+startup (crt0/csv/cerror), the long-arithmetic helpers (lmul/ldiv/lrem,
+almul/aldiv/alrem, mcount), the string/memory and numeric routines from
+`gen/` (strcmp/strlen/strcpy/…, atoi/atol/abs, ctype, qsort, getenv, perror,
+…), buffered stdio (printf/fprintf + fopen/fgets/fputs/fgetc/getc/putc/puts/
+ungetc/fseek/ftell/setbuf and the internals), and the common `sys/` syscall
+stubs.  Still out of scope (stubbed or omitted): floating-point printing
+(%f/%e/%g and atof/ecvt/gcvt — PDP-11 floats aren't IEEE), the varargs
+`sprintf`/`scanf` family, the passwd/group database, networking, and the
+overlay/non-FP/profiling build variants.
+
 ## Development-time references (NOT build dependencies)
 
 These were used only while porting — to cross-check behaviour and trace

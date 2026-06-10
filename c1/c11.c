@@ -932,10 +932,22 @@ getree()
 	case SWIT:
 		t = geti();
 		line = geti();
+		/* The switch table is a PACKED array that pswitch() walks with ++.
+		 * getblk() pads every block to sizeof(struct tnode) (the node-union
+		 * superset) on the host, which would space the swtab entries that far
+		 * apart and make pswitch read garbage (0) for every case value -- so
+		 * pack them tightly into the per-function arena here instead. */
 		curbase = funcbase;
-		while(swp=getblk(sizeof(*swp)), swp->swlab = geti())
+		swp = (struct swtab *)funcbase;
+		while (swp->swlab = geti()) {
 			swp->swval = geti();
-		pswitch(funcbase, swp, t);
+			if ((char *)(++swp + 1) >= coremax) {
+				error("Switch table overflow");
+				exit(1);
+			}
+		}
+		curbase = (char *)(swp + 1);
+		pswitch((struct swtab *)funcbase, swp, t);
 		break;
 
 	case C3BRANCH:		/* for fortran [sic] */

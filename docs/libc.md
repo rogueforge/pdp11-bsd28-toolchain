@@ -1,38 +1,65 @@
 # libc + crt0 (runtime)
 
-The C runtime and a minimal libc, assembled from the **authentic 2.8BSD
-sources** (`libc/` mirrors `usr/kernel/src/libc/`) by this toolchain's own
-`as`, and archived by its `ar` into `usr/lib/libc.a`.  `cc` links a program
-as `ld -X crt0.o <objs> -lc`.
+The C runtime and a substantial slice of the **authentic 2.8BSD libc**
+(`libc/` mirrors `usr/kernel/src/libc/`), built by this toolchain's own `cc`
+(C sources) and `as` (assembly), archived by its `ar`, and indexed by its
+`ranlib` into `usr/lib/libc.a` (107 members).  `cc` links a program as
+`ld -X crt0.o <objs> -lc`.
 
 ## Pieces
 
-- `libc/csu/crt0.s` — C startup `start:`: sets up argc/argv/environ on the
-  stack, calls `_main`, passes its return value to `exit`.
-- `libc/crt/csv.s` — `csv`/`cret`, the function prologue/epilogue helpers c1
-  emits a call to in every function.
-- `libc/crt/cerror.s` — error return (`sets errno`, returns -1).
-- `libc/gen/cuexit.s` — `exit()` (flush via `__cleanup`, then the exit trap).
-- `libc/gen/cleanup.s` — minimal `__cleanup` (no buffered stdio yet).
-- `libc/sys/*.s` — syscall stubs (write, read, open, close, creat, lseek,
-  exit, sbrk, unlink, fstat), each assembled with `libc/include/sys.s`
-  (the syscall-number definitions) prepended -- exactly as 2.8BSD built them
-  (`as -o x.o /usr/include/sys.s x.s`).
+Startup & runtime helpers (assembly, `crt/` + `csu/` + `gen/`):
+- `csu/crt0.s` — C startup `start:`: argc/argv/environ on the stack, calls
+  `_main`, passes its return value to `exit`.  Installed as `usr/lib/crt0.o`.
+- `crt/csv.s` — `csv`/`cret`, the prologue/epilogue helpers c1 calls in every
+  function.
+- `crt/cerror.s` — error return (sets `errno`, returns -1).
+- `crt/{lmul,ldiv,lrem,almul,aldiv,alrem}.s` — the long-arithmetic helpers c1
+  emits calls to for 32-bit `long` multiply/divide/remainder; `crt/mcount.s`
+  for `-p` profiling counters.
+- `gen/{cuexit,setjmp,abort}.s` — `exit()` (flush via `_cleanup` then the trap),
+  `setjmp`/`longjmp`, `abort`.
 
-## Assembler features these sources required
+C library (compiled by our `cc`):
+- `gen/` — string/memory (`strcmp` `strlen` `strcpy` `strcat` `strncmp`
+  `strncpy` `strncat` `index` `rindex`), numeric (`atoi` `atol` `abs`),
+  char-class table (`ctype_`), `qsort`, and small utilities (`getenv`
+  `mktemp` `perror` `errlst` `swab` `isatty` `isapipe` `stty`/`gtty` `sleep`
+  `malloc`).
+- `stdio/` — the full buffered-I/O layer: `printf`/`fprintf` (over the asm
+  `_doprnt`), `fopen`/`freopen`/`fdopen`, `fgets`/`fputs`/`fgetc`/`getchar`/
+  `putchar`/`puts`/`gets`, `ungetc`, `fseek`/`ftell`/`rew`, `setbuf`, the
+  internals (`data` `filbuf` `flsbuf` `findiop` `endopen` `rdwr` `strout`
+  `clrerr`), and `getw`/`putw`.
+- `sys/` — ~40 syscall stubs (`write` `read` `open` `close` `creat` `lseek`
+  `stat` `fstat` `lstat` `dup` `pipe` `fork` `wait` `exec*` `getpid`
+  `get/set uid/gid` `access` `chmod` `chown` `chdir` `link` `unlink` `kill`
+  `ioctl` `umask` `time` `alarm` `sbrk` …), each assembled with
+  `libc/include/sys.s` (the syscall-number defs) prepended — exactly as
+  2.8BSD built them.
 
-The hand-written assembly exercises syntax `cc` output never used, which the
-C-reimplemented `as` had to grow (see docs/as.md): multi-file input (the
-prepended `sys.s`), numeric local labels (`1:`/`1f`/`1b`), the `..`
-relocation-base placeholder, and the no-operand instructions (`setd`, ...).
+## Out of scope (stubbed or omitted)
 
-## Archive ordering (no ranlib yet)
+Floating-point printing (`%f`/`%e`/`%g`, `atof`, `ecvt`, `gcvt` — PDP-11
+floats aren't IEEE; `stdio/fltstub.s` stubs the format hooks), the varargs
+`sprintf`/`scanf` family, the passwd/group database, networking, and the
+overlay / non-FP / profiling build variants.  `malloc` is currently a minimal
+bump allocator rather than the authentic free-list version.
 
-This `ld` scans a plain `.a` single-pass, so `libc.a` lists members in
-dependency order (a referencer before its definer): the leaf helpers
-`cleanup.o`/`cerror.o`/`csv.o` come last.  A `ranlib`/`__.SYMDEF` table would
-remove this ordering requirement -- a natural next step.
+## Porting notes
+
+Importing the library exercised paths `cc` output never had, which surfaced
+two real compiler bugs (both fixed): the **`switch` table** packed wrong on
+the host (getblk pads to the node-union size, so `pswitch` read every case as
+0 — c1/c11.c), and **`long + char`** segfaulted c1 because the ITOL promotion
+node's unset `tr2` was dereferenced (a NULL the PDP-11 tolerated — c10.c).
+The hand-written assembly also needed `as` features `cc` never emits (see
+docs/as.md): multi-file input, numeric local labels, the `..` relocation
+base.  `apsim` grew `ioctl` (reports ENOTTY so `isatty()==0` and stdio
+block-buffers) and `unlink`.
 
 ## Build
 
-`make libc` assembles the objects and builds `usr/lib/{crt0.o,libc.a}`.
+`make libc` compiles/assembles the objects and builds `usr/lib/{crt0.o,
+libc.a}` (ranlib'd, so members may be in any order).  The member lists live in
+the `LIBC_*` variables at the top of the `libc:` rule in the Makefile.

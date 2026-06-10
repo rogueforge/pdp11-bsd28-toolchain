@@ -52,9 +52,11 @@ All tools are installed to `${DESTDIR}/usr/bin/` with a `pdp11-bsd28-` prefix:
 | `pdp11-bsd28-nm` / `-size` / `-strip` | a.out inspection tools |
 | `pdp11-bsd28-apsim` | host-side user-mode PDP-11 simulator (runs the output) |
 
-Plus the runtime in `${DESTDIR}/usr/lib/`: `crt0.o` and `libc.a` (the
-authentic 2.8BSD libc — startup, syscall stubs, and buffered `stdio` with a
-working `printf`).
+Plus the runtime in `${DESTDIR}/usr/lib/`: `crt0.o` and `libc.a` (a
+substantial slice of the authentic 2.8BSD libc — 107 members: startup and
+long-arithmetic helpers, the string/memory/numeric `gen/` routines, `qsort`,
+buffered `stdio` including file I/O (`fopen`/`fgets`/`fputs`/`fseek`/…), and
+~40 syscall stubs).  See [docs/libc.md](docs/libc.md).
 
 ## Using the toolchain
 

@@ -478,7 +478,11 @@ struct table *table;
 	 * Because of a peculiarity of the PDP11 table
 	 * char = *intreg++ and *--intreg cannot go through.
  	 */
-	if (tree->tr1->type==CHAR && tree->tr2->type!=CHAR
+	/* tr2 NULL-guard: this is a binary-op fixup, but unary conversion nodes
+	 * (e.g. ITOL promoting a char for `long + char') also reach here with
+	 * tr1->type==CHAR and tr2 unset.  On the PDP-11 the NULL tr2 read as 0 so
+	 * the condition was harmlessly false; on the host it segfaults. */
+	if (tree->tr2 && tree->tr1->type==CHAR && tree->tr2->type!=CHAR
 	 && (tree->tr2->op==AUTOI||tree->tr2->op==AUTOD))
 		tree->tr2 = tnode(LOAD, tree->tr2->type, tree->tr2);
 	if (table==cregtab)
