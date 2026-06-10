@@ -229,8 +229,11 @@ long expr(segp) int *segp; {
 		if(t=='+'||t=='-'||t=='*'||t=='/'||t=='&'||t=='|'||t=='%'||t=='^'||t=='!'||t==TLSH||t==TRSH){
 			lex(); v2=term(&seg2);
 			switch(t){
-			case '+': v+=v2; if(seg==SABS){seg=seg2;es=exsym;} else if(seg2!=SABS)aerror("non-abs in +"); break;
-			case '-': v-=v2; if(seg==seg2&&seg!=SEXT){seg=SABS;es=0;} else if(seg2!=SABS)aerror("bad -"); break;
+			/* the segment checks fire only in pass 2: a forward reference is an
+			 * undefined SEXT in pass 1 but may resolve to an absolute symbol
+			 * defined later (e.g. boot blocks' `$preset+go', preset/go = ...) */
+			case '+': v+=v2; if(seg==SABS){seg=seg2;es=exsym;} else if(seg2!=SABS&&pass==2)aerror("non-abs in +"); break;
+			case '-': v-=v2; if(seg==seg2&&seg!=SEXT){seg=SABS;es=0;} else if(seg2!=SABS&&pass==2)aerror("bad -"); break;
 			case '*': v*=v2; break; case '/': if(v2)v/=v2; break;
 			case '%': if(v2)v%=v2; break;
 			case '&': v&=v2; break; case '|': v|=v2; break; case '^': v^=v2; break;
