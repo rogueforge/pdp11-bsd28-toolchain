@@ -188,6 +188,7 @@ long term(segp) int *segp; {
 	int t=lex(); long v; struct sym *sp;
 	exsym=0; *segp=SABS;
 	if(t=='-'){ v=term(segp); return -v; }
+	if(t=='+'){ return term(segp); }	/* unary plus (e.g. `+2(r0)') */
 	if(t=='~'){ v=term(segp); return ~v; }
 	if(t=='!'){ v=term(segp); return ~v; }	/* 2BSD as: unary one's complement */
 	if(t=='('){ v=expr(segp); if(lex()!=')')aerror("missing )"); return v; }

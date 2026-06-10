@@ -156,14 +156,15 @@ exists on the 2.8BSD PDP-11 and is out of scope.
 `libc.a` now carries the practical core of the authentic 2.8BSD libc: program
 startup (crt0/csv/cerror), the long-arithmetic helpers (lmul/ldiv/lrem,
 almul/aldiv/alrem, mcount), the string/memory and numeric routines from
-`gen/` (strcmp/strlen/strcpy/…, atoi/atol/abs, ctype, qsort, getenv, perror,
-…), buffered stdio (printf/fprintf/sprintf + fopen/fgets/fputs/fgetc/getc/
-putc/puts/ungetc/fseek/ftell/setbuf and the internals), the authentic
-free-list malloc/free/realloc, and the common `sys/` syscall stubs.  Still
-out of scope (stubbed or omitted): floating-point printing (%f/%e/%g and
-atof/ecvt/gcvt — PDP-11 floats aren't IEEE) and hence the `scanf` family (its
-number scanner inlines float ops `as` won't assemble), the passwd/group
-database, networking, and the overlay/non-FP/profiling build variants.
+`gen/` (strcmp/strlen/strcpy/…, atoi/atol/abs/atof, ctype, qsort, getenv,
+perror, …), buffered stdio (printf/fprintf/sprintf + scanf/sscanf + fopen/
+fgets/fputs/fgetc/getc/putc/puts/ungetc/fseek/ftell/setbuf and the internals),
+the authentic free-list malloc/free/realloc, and the common `sys/` syscall
+stubs.  **Floating point is fully supported** (DEC F/D format, not IEEE): the
+FP11 codegen assembles and runs in apsim, and printf `%f`/`%e`/`%g`, scanf
+`%f`, atof, and ecvt/fcvt/gcvt/modf/ldexp/frexp all work.  Still out of scope
+(stubbed or omitted): the passwd/group database, networking, and the
+overlay/non-FP/profiling build variants.
 
 ## Development-time references (NOT build dependencies)
 

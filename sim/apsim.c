@@ -44,15 +44,18 @@ static void st1(int a,int v){ M[a&0xffff]=v&0xff; }
 /* Read a DEC float at `addr' (dbl ? D:4 words : F:2 words) -> host double.
  * The sign/exponent word is at the lowest address; value =
  * (-1)^S * (0.5 + frac/2^56) * 2^(E-128), 8-bit excess-128 exponent. */
-static double rdfloat(int addr, int dbl){
-	unsigned long long bits=0; int i, nw=dbl?4:2, s, e;
-	unsigned long long f;
-	for(i=0;i<nw;i++) bits=(bits<<16)|ld2((addr+2*i)&0xffff);
-	if(!dbl) bits<<=32;			/* left-justify F into 64 bits */
-	s=(bits>>63)&1; e=(bits>>55)&0377; f=bits&0x7FFFFFFFFFFFFFULL;
+static double bits2dbl(unsigned long long bits){	/* 64-bit DEC field -> double */
+	int s=(bits>>63)&1, e=(bits>>55)&0377;
+	unsigned long long f=bits&0x7FFFFFFFFFFFFFULL;
 	if(e==0) return 0.0;			/* DEC zero (and "undefined") */
 	{ double m=0.5+(double)f/72057594037927936.0, v=ldexp(m, e-128);
 	  return s?-v:v; }
+}
+static double rdfloat(int addr, int dbl){
+	unsigned long long bits=0; int i, nw=dbl?4:2;
+	for(i=0;i<nw;i++) bits=(bits<<16)|ld2((addr+2*i)&0xffff);
+	if(!dbl) bits<<=32;			/* left-justify F into 64 bits */
+	return bits2dbl(bits);
 }
 /* Write host double `v' as a DEC float at `addr' (dbl ? D : F). */
 static void wrfloat(int addr, double v, int dbl){
@@ -197,13 +200,30 @@ static int cond(int instr){		/* branch taken? */
  * mode is register-direct, else a float/int in memory).  Memory floats use
  * the current FPS precision, except the convert forms (movof/movfo) which use
  * the OTHER precision.  c1 only ever uses ac0/ac1 and non-autoincrement modes. */
+/* Effective address of a float memory operand.  The autoincrement/decrement
+ * modes (Rn)+ and -(Rn) must step by the FLOAT size (8 for D, 4 for F), not
+ * the 2 that operand() assumes -- e.g. `movf r0,-(sp)' pushes a whole double.
+ * The deferred forms @(Rn)+/@-(Rn) step a word (the pointer) and the index
+ * modes are unaffected, so those delegate to operand(). */
+static int fp_addr(int spec, int dbl){
+	int mode=(spec>>3)&7, rn=spec&7, size=dbl?8:4, a;
+	if(mode==2){ a=R[rn]; R[rn]=(R[rn]+size)&0xffff; return a; }	/* (Rn)+ */
+	if(mode==4){ R[rn]=(R[rn]-size)&0xffff; return R[rn]; }		/* -(Rn) */
+	return operand(spec,0);
+}
 static double fp_get(int spec, int dbl){	/* float source operand */
 	if(((spec>>3)&7)==0) return AC[spec&7];
-	return rdfloat(operand(spec,0), dbl);
+	if(((spec>>3)&7)==2 && (spec&7)==7){	/* #imm: a 1-word F-high literal
+						 * (e.g. modf $one) -- the assembler
+						 * emits only the high word. */
+		int hi=ld2(PC); PC=(PC+2)&0xffff;
+		return bits2dbl((unsigned long long)(unsigned short)hi << 48);
+	}
+	return rdfloat(fp_addr(spec,dbl), dbl);
 }
 static void fp_put(int spec, double v, int dbl){	/* float dest operand */
 	if(((spec>>3)&7)==0){ AC[spec&7]=v; return; }
-	wrfloat(operand(spec,0), v, dbl);
+	wrfloat(fp_addr(spec,dbl), v, dbl);
 }
 static void fp_setcc(double v){ fN=v<0; fZ=v==0; fV=0; fC=0; }
 
@@ -236,6 +256,10 @@ static void do_fp(int instr){
 	}
 	/* two-operand ops: opcode bits 15-8, AC in bits 7-6 */
 	switch(op){
+	case 0171400:	/* modf: product = AC[ac]*fsrc; AC[ac|1]=int, AC[ac]=frac */
+		{ double ip, fr=modf(AC[ac]*fp_get(spec,dbl), &ip);
+		  AC[ac|1]=ip; AC[ac]=fr; fp_setcc(AC[ac]); }
+		return;
 	case 0171000: AC[ac]*=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* mulf */
 	case 0172000: AC[ac]+=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* addf */
 	case 0173000: AC[ac]-=fp_get(spec,dbl); fp_setcc(AC[ac]); return;	/* subf */
@@ -245,6 +269,16 @@ static void do_fp(int instr){
 	case 0174000: fp_put(spec,AC[ac],dbl); fp_setcc(AC[ac]); return;	/* movf STF */
 	case 0177400: AC[ac]=fp_get(spec,!dbl); fp_setcc(AC[ac]); return;	/* movof (load cvt) */
 	case 0176000: fp_put(spec,AC[ac],!dbl); fp_setcc(AC[ac]); return;	/* movfo (store cvt) */
+	case 0175000:	/* movei (STEXP): dst = unbiased exponent of AC[ac] */
+		{ int e=0; if(AC[ac]!=0) frexp(AC[ac],&e);
+		  if(isreg) R[reg]=e&0xffff; else st2(operand(spec,0),e&0xffff); }
+		return;
+	case 0176400:	/* movie (LDEXP): AC[ac] = mantissa(AC[ac]) * 2^(int src) */
+		{ int n=isreg?(short)R[reg]:(short)ld2(operand(spec,0)), oe=0;
+		  double m=(AC[ac]==0)?0.0:frexp(AC[ac],&oe);
+		  AC[ac]=ldexp(m,n);
+		  fN=AC[ac]<0; fZ=AC[ac]==0; fV=(n>127||n<-127); fC=0; }
+		return;
 	case 0177000:	/* movif: int -> float */
 		if(isreg) iv=(short)R[reg];
 		else { addr=operand(spec,0);

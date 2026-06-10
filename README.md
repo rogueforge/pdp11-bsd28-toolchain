@@ -109,9 +109,11 @@ pointer-in-`int` truncation). Each tool has a porting guide in
 
 The full pipeline works end to end: `cc hello.c -o hello` produces a runnable
 classic 2.8BSD `a.out`, verified by execution in `apsim`, including buffered
-`printf` (`%d %s %c %x %o`). The `c2` peephole optimizer works too — `cc -O`
-runs it and produces correct, smaller code (loops, recursion, calls, and the
-stdio path are covered by the test suite). It is opt-in via `-O`.
+`printf`/`scanf` (`%d %s %c %x %o` and `%f`/`%e`/`%g`). **Floating point is
+fully supported** — the authentic DEC F/D format (not IEEE): FP11 codegen
+assembles and runs, and `%f` printing, `atof`, and the math helpers all work.
+The `c2` peephole optimizer works too — `cc -O` runs it and produces correct,
+smaller code. It is opt-in via `-O`.
 
 ## License / provenance
 

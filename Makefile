@@ -250,11 +250,11 @@ LSYS = libc/include/sys.s
 # gen/ C sources (string, memory, numeric, char-class, small utilities)
 LIBC_GENC = strcmp strlen strcpy strcat strncmp strncpy strncat index rindex \
 	    atoi atol abs ctype_ getenv mktemp perror errlst qsort swab isatty \
-	    isapipe stty sleep malloc calloc
-# stdio/ C sources (the full buffered-I/O layer minus float/varargs/db)
+	    isapipe stty sleep malloc calloc atof ecvt
+# stdio/ C sources (the full buffered-I/O layer minus the scanf/db family)
 LIBC_STDIOC = printf fprintf data strout flsbuf fputc fopen freopen fdopen \
 	      fgets fputs fgetc getchar putchar puts gets ungetc fseek ftell rew \
-	      setbuf clrerr filbuf findiop endopen rdwr getw putw sprintf
+	      setbuf clrerr filbuf findiop endopen rdwr getw putw sprintf gcvt scanf doscan
 # sys/ syscall stubs (assembled with the sys.s number defs)
 LIBC_SYS = write read open close creat lseek exit sbrk unlink fstat stat lstat \
 	   dup pipe fork wait getpid getuid getgid setuid setgid access chmod \
@@ -265,9 +265,9 @@ LIBC_ARITH = lmul ldiv lrem almul aldiv alrem mcount
 
 # Full object list for the archive (with directory prefixes).
 LIBC_OBJS = $(addprefix libc/gen/,$(addsuffix .o,${LIBC_GENC})) \
-	    libc/gen/cuexit.o libc/gen/setjmp.o libc/gen/abort.o \
+	    libc/gen/cuexit.o libc/gen/setjmp.o libc/gen/abort.o libc/gen/modf.o libc/gen/ldexp.o libc/gen/frexp.o \
 	    $(addprefix libc/stdio/,$(addsuffix .o,${LIBC_STDIOC})) \
-	    libc/stdio/doprnt.o libc/stdio/fltstub.o \
+	    libc/stdio/doprnt.o libc/stdio/fltpr.o \
 	    $(addprefix libc/sys/,$(addsuffix .o,${LIBC_SYS})) \
 	    libc/crt/csv.o libc/crt/cerror.o \
 	    $(addprefix libc/crt/,$(addsuffix .o,${LIBC_ARITH}))
@@ -281,8 +281,13 @@ libc: as-tool ar-tool ranlib-tool cc-tool headers dirs
 	${ASM} -o libc/gen/cuexit.o   ${LSYS} libc/gen/cuexit.s
 	${ASM} -o libc/gen/setjmp.o            libc/gen/setjmp.s
 	${ASM} -o libc/gen/abort.o             libc/gen/abort.s
+	${ASM} -o libc/gen/modf.o              libc/gen/modf.s
+	${ASM} -o libc/gen/ldexp.o             libc/gen/ldexp.s
+	${ASM} -o libc/gen/frexp.o             libc/gen/frexp.s
 	${ASM} -o libc/stdio/doprnt.o          libc/stdio/doprnt.s
-	${ASM} -o libc/stdio/fltstub.o         libc/stdio/fltstub.s
+	# fltpr: the authentic float-print hooks (pfloat/pscien/pgen) doprnt calls
+	# for %f/%e/%g; it also defines `fltused' (replacing the old fltstub).
+	${ASM} -o libc/stdio/fltpr.o           libc/stdio/fltpr.s
 	# syscall stubs
 	for f in ${LIBC_SYS}; do ${ASM} -o libc/sys/$$f.o ${LSYS} libc/sys/$$f.s; done
 	# crt: csv + cerror + long arithmetic
