@@ -111,6 +111,19 @@ static unsigned char *Targ;	/* per text byte: a branch/jsr/jmp target lands here
 #define CF_STOP 4	/* rts/rti/rtt/halt/computed jmp: no fall-through */
 static int CFtype, CFtarg;	/* decode() sets these for the decoded instruction */
 static int Optarg;		/* numeric pcrel/abs target of the last operand, or -1 */
+static int CFsysargs;		/* inline argument words following a `sys' instruction */
+
+/* Number of inline argument words a `sys N' carries -- exactly what the 2BSD
+ * kernel skips: `pc += sy_narg - sy_nrarg' (trap.c), the total args minus those
+ * passed in registers, from the sysent[64] table (sys/sysent.c).  indir (0)
+ * reads one word (the indirect block address).  This lets the control-flow walk
+ * step over `sys lseek; 0; 0; 0' style inline args to reach the code beyond. */
+static char sysinline[64] = {
+	1,0,0,2,2,2,0,0,2,2,1,2,1,0,3,2,
+	3,1,2,3,0,3,1,0,0,0,3,0,1,0,2,1,
+	1,2,0,1,0,1,0,0,0,0,0,1,4,0,0,0,
+	2,0,0,0,1,0,3,1,3,0,4,0,0,3,1,1,
+};
 
 /* nearest defined label at or below `val' in segment `seg' (for symbol+offset
  * references like `0f+2'); returns its name (and *base = its value) or 0. */
@@ -273,7 +286,7 @@ static int decode(long o, int addr, char *buf)
 {
 	int instr=w16(o), op, a1, a2;
 	Iaddr=addr;
-	CFtype=CF_NEXT; CFtarg=-1; Optarg=-1;	/* control-flow of this instruction */
+	CFtype=CF_NEXT; CFtarg=-1; Optarg=-1; CFsysargs=0;	/* control-flow of this instruction */
 	long po=o+2;			/* offset just past the opcode word */
 	int adr=addr+2;			/* PC value while reading index words */
 	char o1[32], o2[32];
@@ -318,7 +331,7 @@ static int decode(long o, int addr, char *buf)
 		return 2;
 	}
 	/* sys / emt / trap */
-	if((instr&0177400)==0104400){ sprintf(buf,"sys\t%o",instr&0377); return 2; }
+	if((instr&0177400)==0104400){ sprintf(buf,"sys\t%o",instr&0377); CFsysargs=sysinline[instr&077]; return 2; }
 	if((instr&0177400)==0104000){ sprintf(buf,"emt\t%o",instr&0377); return 2; }
 
 	op=(instr>>12)&017;
@@ -469,6 +482,11 @@ static void markcode(long tbase, int a1)
 			if(straddle){ Mark[pc]=2; if(pc+1<a1)Mark[pc+1]=2; pc+=2; continue; }
 			Mark[pc]=1;
 			for(k=1;k<len && pc+k<a1;k++) Mark[pc+k]=2;
+			if(CFsysargs){	/* `sys N' is followed by sysinline[N] inline data words */
+				int j; pc+=len;
+				for(j=0;j<CFsysargs && pc+1<a1;j++){ Mark[pc]=2; Mark[pc+1]=2; pc+=2; }
+				continue;
+			}
 			if(CFtarg>=0 && CFtarg<a1){ Targ[CFtarg]=1; if(qn<qmax) q[qn++]=CFtarg; }
 			if(CFtype==CF_JUMP || CFtype==CF_STOP) break;	/* no fall-through */
 			pc+=len;
