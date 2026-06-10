@@ -193,8 +193,15 @@ again:
 		if(*ip=='\\'){ ip++; tokval=escval((unsigned char)*ip); }
 		else tokval=(unsigned char)*ip;
 		if(*ip)ip++; return tok=TNUM; }
-	if (c=='"'||c=='<') {
-		int term=(c=='"')?'"':'>'; ip++; tokslen=0;
+	if (c=='"') { int lo,hi; ip++;		/* double-character constant "xy:
+						 * first char low byte, second high byte */
+		if(*ip=='\\'){ ip++; lo=escval((unsigned char)*ip); } else lo=(unsigned char)*ip;
+		if(*ip)ip++;
+		if(*ip=='\\'){ ip++; hi=escval((unsigned char)*ip); } else hi=(unsigned char)*ip;
+		if(*ip)ip++;
+		tokval=(lo&0377)|((hi&0377)<<8); return tok=TNUM; }
+	if (c=='<') {				/* string (as in .ascii <...>); 2BSD uses < > */
+		int term='>'; ip++; tokslen=0;
 		while(*ip&&*ip!=term){
 			int ch=(unsigned char)*ip++;
 			if(ch=='\\'&&*ip){ ch=escval((unsigned char)*ip); ip++; }
