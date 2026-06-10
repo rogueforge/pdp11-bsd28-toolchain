@@ -639,6 +639,10 @@ static void disasm_data(long dbase, int a0, int size, FILE *out)
 			fprintf(out, "\t%06o:  %06o\n", addr, w16(wo));
 		addr+=2;
 	}
+	/* a data symbol can mark the very end of .data (one past the last word) --
+	 * e.g. roff/primes' `ftabend' after a table.  The loop stops before it, so
+	 * emit it here; otherwise it is undefined and every reference to it shifts. */
+	labels(end, N_DATA, out);
 }
 
 static int haslabel(int addr, int seg)
