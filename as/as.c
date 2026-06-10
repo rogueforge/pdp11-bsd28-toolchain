@@ -13,8 +13,9 @@
  *   1 abs  6 branch  7 jsr/xor  010 rts  011 sys  013 double-op  015 single
  *   016 .byte  017 .ascii  020 .even  023 .globl  024 register  025/26/27
  *   .text/.data/.bss  030 mul/div(EIS)  031 sob  032 .comm  035 jbr  036 jxxx
- *   040 .word (bare expression).  Span-dependent jumps (035/036) are always
- *   emitted in the long (jmp) form -- correct, if not minimal.
+ *   040 .word (bare expression).  Span-dependent jumps (035/036) are resolved
+ *   to the short branch form when the target is a near text label, matching the
+ *   2BSD assembler (see the relaxation loop in main).
  *
  * Usage:  as [-o out.o] [-u] file
  */
@@ -57,6 +58,7 @@ struct sym {
 	int flags;
 	int kwtype;		/* instruction type carried via `^' (`stst = N^tst'), or 0 */
 	int index;		/* assigned at symbol-table output */
+	int defpass;		/* passno of the last label definition (dup-label check) */
 	struct sym *next;
 };
 #define SF_GLOBL 01
@@ -79,6 +81,16 @@ int dot[NSEG];
 int curseg;			/* 0/1/2 */
 unsigned char *segbuf[NSEG], *relbuf[NSEG];
 int segcap[NSEG];
+int passno;			/* unique counter per assembly pass (dup-label check) */
+
+/* span-dependent jumps: jbr/jxxx (035/036) emit a 1-word branch when the target
+ * is a near text label, else the long jmp form.  The choice (spanlong[]) is made
+ * by relaxation over repeated address passes; spanloc/spantarg/spanseg are the
+ * jump word's address, target address and target segment recorded each pass. */
+#define MAXSPAN 30000
+char spanlong[MAXSPAN];
+int  spanloc[MAXSPAN], spantarg[MAXSPAN], spanseg[MAXSPAN];
+int  spanidx, nspan, relaxing;
 
 void aerror(s) char *s; {
 	fprintf(stderr, "as: %s:%d: %s\n", infile, lineno, s);
@@ -439,13 +451,35 @@ void eisop(base){ struct operand s,d; getop(&s); if(lex()!=',')aerror("missing ,
 void sobop(base){ struct operand r; int seg; long v;
 	getop(&r); if(lex()!=',')aerror("missing ,"); v=expr(&seg);
 	{ long off=(dot[curseg]+2-v)/2; emitword(base|((r.mode&07)<<6)|(off&077),SABS,0,0); } }
-/* jbr addr -> jmp addr (always long) */
-void jbrop(){ struct operand d; getop(&d); emitword(0000100|(d.mode&077),SABS,0,0); putop(&d); }
-/* jxxx addr -> b<not-cond> .+6 ; jmp addr   (always long) */
-void jxxxop(brbase){ struct operand d; int comp=brbase^0400;
-	getop(&d);
-	emitword(comp|2,SABS,0,0);		/* skip the 2-word jmp when cond false */
-	emitword(0000100|(d.mode&077),SABS,0,0); putop(&d);
+/* record this span item's geometry; a span is short-eligible only when its
+ * operand is a pc-relative reference (the form a branch can take) to a text
+ * label, and the code itself is in text */
+int spanrec(struct operand *d){
+	int sidx=spanidx++, shortok = (d->mode==067 && d->pcrel && curseg==0);
+	if(sidx<MAXSPAN){
+		spanloc[sidx]=dot[curseg]; spantarg[sidx]=d->xval;
+		spanseg[sidx]= shortok ? d->xseg : SABS;
+		if(!shortok) spanlong[sidx]=1;
+	}
+	return sidx;
+}
+/* a short branch's 8-bit displacement; flagged if it ever falls out of range
+ * in the emit pass (the relaxation should have grown it to long first) */
+int brdisp(int targ){
+	int off=(targ-(dot[curseg]+2))/2;
+	if(pass==2 && (off<-128||off>127)) aerror("span branch out of range");
+	return off&0377;
+}
+/* jbr addr -> br addr (1 word) when near, else jmp addr */
+void jbrop(){ struct operand d; int sidx; getop(&d); sidx=spanrec(&d);
+	if(sidx<MAXSPAN && !spanlong[sidx]) emitword(000400|brdisp(d.xval),SABS,0,0);	/* br */
+	else { emitword(0000100|(d.mode&077),SABS,0,0); putop(&d); }			/* jmp */
+}
+/* jxxx addr -> b<cond> addr (1 word) when near, else b<not-cond> .+6 ; jmp addr */
+void jxxxop(brbase){ struct operand d; int sidx, comp=brbase^0400; getop(&d); sidx=spanrec(&d);
+	if(sidx<MAXSPAN && !spanlong[sidx]) emitword(brbase|brdisp(d.xval),SABS,0,0);	/* b<cond> */
+	else { emitword(comp|2,SABS,0,0);						/* b<not-cond> .+6 */
+	       emitword(0000100|(d.mode&077),SABS,0,0); putop(&d); }			/* jmp addr */
 }
 
 void dobyte(){ int seg; for(;;){ if(peek()==TSTR){lex(); int i;for(i=0;i<tokslen;i++)emitbyte(tokstr[i]);}
@@ -485,7 +519,11 @@ void assemble()
 			if(t2==':'){
 				if(strcmp(name,".")!=0){
 					struct sym*sp=lookup(name);
-					if((sp->flags&SF_DEF)&&pass==1) aerror("redefined symbol");
+					/* a genuine dup is two definitions in the SAME pass; the
+					 * relaxation re-defines every label each pass (not an error),
+					 * so the dup test keys on passno, not SF_DEF */
+					if(sp->defpass==passno) aerror("redefined symbol");
+					sp->defpass=passno;
 					sp->flags|=SF_DEF; sp->seg=curseg+1; sp->value=dot[curseg];
 				}
 				continue;
@@ -683,9 +721,31 @@ char**argv;
 		ibufstart=ibuf; ibufend=p;
 	}
 
-	/* pass 1: assign addresses */
-	pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt);
-	assemble();
+	/* Address passes with span relaxation.  Start every jbr/jxxx short, assign
+	 * addresses, then grow to the long jmp form any whose target is external or
+	 * out of branch range; repeat until the choices stabilise.  Growth is
+	 * monotonic (short->long only), so this converges.  The first pass only
+	 * establishes addresses -- forward targets aren't defined yet -- so growth
+	 * decisions start on the second.  pass stays 1 (no bytes emitted); passno
+	 * makes each pass distinct for the duplicate-label check. */
+	relaxing=1;
+	{ int iter=0, changed, i;
+	  memset(spanlong,0,sizeof spanlong);
+	  do {
+		passno++; pass=1; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0;
+		lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt); spanidx=0;
+		assemble();
+		nspan=spanidx; changed=0;
+		if(iter>0) for(i=0;i<nspan && i<MAXSPAN;i++) if(!spanlong[i]){
+			int off, needlong=(spanseg[i]!=STEXT);	/* external/abs -> long */
+			if(!needlong){ off=(spantarg[i]-(spanloc[i]+2))/2; needlong=(off<-128||off>127); }
+			if(needlong){ spanlong[i]=1; changed=1; }
+		}
+		iter++;
+		if(iter>nspan+8){ if(changed) aerror("span relaxation did not converge"); break; }
+	  } while(changed || iter==1);
+	}
+	relaxing=0;
 	/* segment sizes are now known (even-rounded, as ld rounds them); the
 	 * data/bss base used to bias values in the unified object space */
 	txtsize = (dot[0]+1) & ~1;
@@ -699,8 +759,8 @@ char**argv;
 		if(((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT) && sp->name[0]!=1)
 			sp->index=idx++;
 	}
-	/* pass 2: emit */
-	pass=2; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt);
+	/* pass 2: emit, using the relaxed span sizes */
+	passno++; pass=2; ip=ibufstart; curseg=0; dot[0]=dot[1]=dot[2]=0; lineno=1; pbsp=0; memset(loccnt,0,sizeof loccnt); spanidx=0;
 	assemble();
 	if(errors){ fprintf(stderr,"as: %d error(s)\n",errors); return 1; }
 	writeout();
