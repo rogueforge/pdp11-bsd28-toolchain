@@ -96,6 +96,22 @@ static char *orsynth(char *l, int targ){
 
 static int Iaddr;	/* address of the instruction currently being decoded */
 
+/* ---- control-flow (recursive-descent) code/data map --------------------- *
+ * Linear sweep decodes inline data (jump tables, a `jsr r5,error; 'x' char
+ * argument whose value happens to be a `jmp' opcode) as instructions, which
+ * fabricates bogus far branch targets.  Before emitting, we walk the actual
+ * control flow from known entry points (every defined text symbol) to mark
+ * which bytes are reachable as CODE; everything else is emitted as data. */
+static unsigned char *Mark;	/* per text byte: 0 unseen, 1 instr-start, 2 seen */
+static unsigned char *Targ;	/* per text byte: a branch/jsr/jmp target lands here */
+#define CF_NEXT 0	/* falls through */
+#define CF_COND 1	/* conditional branch / sob: fall-through AND target */
+#define CF_JUMP 2	/* unconditional br/jmp: target only, no fall-through */
+#define CF_CALL 3	/* jsr: fall-through AND target */
+#define CF_STOP 4	/* rts/rti/rtt/halt/computed jmp: no fall-through */
+static int CFtype, CFtarg;	/* decode() sets these for the decoded instruction */
+static int Optarg;		/* numeric pcrel/abs target of the last operand, or -1 */
+
 /* nearest defined label at or below `val' in segment `seg' (for symbol+offset
  * references like `0f+2'); returns its name (and *base = its value) or 0. */
 static char *nearestlabel(int val, int seg, int *base)
@@ -211,6 +227,7 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 	case 3:
 		if(reg==7){ wo=*po; x=w16(*po); *po+=2; *paddr+=2;	/* @#abs */
 			if(relexp(wo,x,"*$%s",out)) break;
+			Optarg=x;
 			l=labelat(x,N_TEXT); if(!l)l=labelat(x,N_DATA); if(!l)l=labelat(x,N_BSS);
 			l=orsynth(l,x);
 			if(l)sprintf(out,"*$%s",l); else sprintf(out,"*$%o",x); }
@@ -221,8 +238,9 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 	case 6:
 		wo=*po; x=w16(*po); *po+=2; *paddr+=2;
 		if(reg==7){					/* PC-relative */
-			if(relexp(wo,(x+*paddr)&0xffff,"%s",out)) break;
 			targ=(*paddr + (short)x)&0xffff;
+			if(relexp(wo,(x+*paddr)&0xffff,"%s",out)) break;
+			Optarg=targ;
 			l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_BSS);
 			if(l)sprintf(out,"%s",l);
 			else if(offref(targ,wo,out)) ;		/* named symbol + offset */
@@ -250,6 +268,7 @@ static int decode(long o, int addr, char *buf)
 {
 	int instr=w16(o), op, a1, a2;
 	Iaddr=addr;
+	CFtype=CF_NEXT; CFtarg=-1; Optarg=-1;	/* control-flow of this instruction */
 	long po=o+2;			/* offset just past the opcode word */
 	int adr=addr+2;			/* PC value while reading index words */
 	char o1[32], o2[32];
@@ -257,20 +276,22 @@ static int decode(long o, int addr, char *buf)
 
 	/* no-operand */
 	switch(instr){
-	case 0: strcpy(buf,"halt"); return 2;
+	case 0: strcpy(buf,"halt"); CFtype=CF_STOP; return 2;
 	case 1: strcpy(buf,"wait"); return 2;
-	case 2: strcpy(buf,"rti");  return 2;
+	case 2: strcpy(buf,"rti");  CFtype=CF_STOP; return 2;
 	case 3: strcpy(buf,"bpt");  return 2;
 	case 4: strcpy(buf,"iot");  return 2;
 	case 5: strcpy(buf,"reset");return 2;
-	case 6: strcpy(buf,"rtt");  return 2;
+	case 6: strcpy(buf,"rtt");  CFtype=CF_STOP; return 2;
 	}
-	if((instr&0177770)==0000200){ sprintf(buf,"rts\t%s",regname(instr&7)); return 2; }
-	if((instr&0177700)==0000100){ fmtop(instr&077,&po,&adr,o1); sprintf(buf,"jmp\t%s",o1); return po-o; }
+	if((instr&0177770)==0000200){ sprintf(buf,"rts\t%s",regname(instr&7)); CFtype=CF_STOP; return 2; }
+	if((instr&0177700)==0000100){ fmtop(instr&077,&po,&adr,o1); sprintf(buf,"jmp\t%s",o1);
+		CFtype=(Optarg>=0?CF_JUMP:CF_STOP); CFtarg=Optarg; return po-o; }
 	if((instr&0177700)==0000300){ fmtop(instr&077,&po,&adr,o1); sprintf(buf,"swab\t%s",o1); return po-o; }
 	if((instr&0177000)==0004000){	/* jsr reg,dst  (0004000..0004777) */
 		fmtop(instr&077,&po,&adr,o1);
-		sprintf(buf,"jsr\t%s,%s",regname((instr>>6)&7),o1); return po-o; }
+		sprintf(buf,"jsr\t%s,%s",regname((instr>>6)&7),o1);
+		CFtype=CF_CALL; CFtarg=Optarg; return po-o; }
 	if((instr&0177400)>=0000240 && (instr&0177400)<0000400 && (instr&0400)==0){
 		/* condition-code ops (nop / clc / sec / ...) */
 		static char *cc="cvzn";
@@ -288,6 +309,7 @@ static int decode(long o, int addr, char *buf)
 		char *l=orsynth(labelat(targ,N_TEXT),targ);
 		if(l) sprintf(buf,"%s\t%s",brmne[idx],l);
 		else  sprintf(buf,"%s\t%o",brmne[idx],targ);
+		CFtype=(idx==1?CF_JUMP:CF_COND); CFtarg=targ;	/* idx 1 = unconditional br */
 		return 2;
 	}
 	/* sys / emt / trap */
@@ -344,6 +366,7 @@ static int decode(long o, int addr, char *buf)
 		case 0077000: { int off=instr&077, targ=(addr+2-2*off)&0xffff;
 				char *l=orsynth(labelat(targ,N_TEXT),targ);
 				if(l)sprintf(buf,"sob\t%s,%s",regname(reg),l); else sprintf(buf,"sob\t%s,%o",regname(reg),targ);
+				CFtype=CF_COND; CFtarg=targ;
 				return 2; }
 		}
 	}
@@ -392,6 +415,53 @@ static void labels(int addr, int seg, FILE *out)
 	if(in_aux(addr) && segof(addr)==seg) fprintf(out, "%s:\n", synthname(addr));	/* objdump-style .L<addr> */
 }
 
+/* Recursive-descent: walk control flow from every defined text symbol and mark
+ * each reachable instruction's bytes (Mark[a]=1 at a start).  Unreached bytes
+ * (jump tables, inline char/string args) stay 0 and are emitted as data. */
+static void markcode(long tbase, int a1)
+{
+	int *q, qn=0, qi=0, i, qmax;
+	char buf[120];
+	if(a1<=0 || !Mark || !Targ) return;
+	qmax=a1+NSym+64;
+	q=malloc(sizeof(int)*qmax);
+	for(i=0;i<NSym;i++)			/* seeds: defined text symbols (entries) */
+		if(BASETYPE(Sym[i].type)==N_TEXT && (Sym[i].value&0xffff)<a1 && qn<qmax)
+			q[qn++]=Sym[i].value&0xffff;
+	/* seeds: absolute text pointers -- a word relocated RTEXT but NOT pc-relative
+	 * holds the address of a code block (a jump-table entry / function pointer)
+	 * that is only reached through a computed jump we cannot follow. */
+	{ int a; for(a=0;a+1<a1;a+=2)
+		if((relat(tbase+a)&017)==002){		/* RTEXT, pcrel bit clear */
+			int v=w16(tbase+a)&0xffff;
+			if(v<a1 && qn<qmax){ Targ[v]=1; q[qn++]=v; }
+		}
+	}
+	if(qn==0 && qn<qmax) q[qn++]=0;		/* stripped: assume code starts at 0 */
+	while(qi<qn){
+		int pc=q[qi++];
+		while(pc>=0 && pc<a1 && Mark[pc]==0){
+			int len, k, straddle=0;
+			if(relat(tbase+pc)&016){	/* relocated inline data (e.g. sys arg) */
+				Mark[pc]=2; if(pc+1<a1)Mark[pc+1]=2; pc+=2; continue;
+			}
+			len=decode(tbase+pc, pc, buf);	/* sets CFtype/CFtarg */
+			if(len<2) len=2;
+			/* a multi-word decode that straddles a known branch/jsr target is
+			 * really data (e.g. an inline char arg sitting before real code
+			 * that something branches to) -- emit it as a 1-word datum instead */
+			for(k=2;k<len;k+=2) if(pc+k<a1 && (Mark[pc+k]==1||Targ[pc+k])){ straddle=1; break; }
+			if(straddle){ Mark[pc]=2; if(pc+1<a1)Mark[pc+1]=2; pc+=2; continue; }
+			Mark[pc]=1;
+			for(k=1;k<len && pc+k<a1;k++) Mark[pc+k]=2;
+			if(CFtarg>=0 && CFtarg<a1){ Targ[CFtarg]=1; if(qn<qmax) q[qn++]=CFtarg; }
+			if(CFtype==CF_JUMP || CFtype==CF_STOP) break;	/* no fall-through */
+			pc+=len;
+		}
+	}
+	free(q);
+}
+
 /* disassemble the text in PDP-11 address range [a0,a1); tbase = file offset
  * of address 0 of the text segment. */
 static void disasm_text(long tbase, int a0, int a1, FILE *out)
@@ -401,11 +471,11 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 	while(addr<a1){
 		int len, i;
 		labels(addr, N_TEXT, out);
-		/* a relocated word where an opcode should be is inline data (e.g. a
-		 * `sys' macro's argument: `sys 0; 9f' is the trap then the addr of
-		 * 9:), not code -- opcodes are never relocated.  Emit it symbolically
-		 * so the relocation survives the round-trip. */
-		if(relat(tbase+addr)&016){
+		/* Data, not code: a relocated word where an opcode would be (inline
+		 * `sys'/data argument -- opcodes are never relocated), or a byte the
+		 * control-flow walk did not reach as an instruction start.  Emit it
+		 * symbolically (so relocations survive) or as a raw word. */
+		if((relat(tbase+addr)&016) || (Mark && Mark[addr]!=1)){
 			if(!symword(tbase+addr, addr, buf)) sprintf(buf,"%o",w16(tbase+addr));
 			len=2;
 		} else
@@ -489,6 +559,9 @@ static void do_object(long base, char *what, FILE *out)
 	/* relocation geometry: reltext follows data, reldata follows reltext */
 	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data; Bsz=bss; NAuxSet=0;
 	RTbase=DBASE+data; RDbase=DBASE+data+text; HasReloc=!flag;
+	Mark = text>0 ? calloc(text,1) : 0;	/* control-flow code/data map */
+	Targ = text>0 ? calloc(text,1) : 0;
+	markcode(TBASE, text);
 	banner(out, what, magic, text, data, bss);
 	if(Asm){	/* scan pass: resolve all references (to a null sink) so any
 			 * numeric locals that need a synthetic La<addr> label are known
@@ -511,6 +584,7 @@ static void do_object(long base, char *what, FILE *out)
 	disasm_text(TBASE, 0, text, out);
 	if(data){ fprintf(out, "\n.data\n"); disasm_data(DBASE, text, data, out); }
 	if(bss){ fprintf(out, "\n.bss\n"); dump_bss(text+data, bss, out); }
+	free(Mark); Mark=0; free(Targ); Targ=0;
 }
 
 /* open <stem>.<obj>.dis, de-duplicating repeated basenames */

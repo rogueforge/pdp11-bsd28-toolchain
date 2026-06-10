@@ -25,6 +25,19 @@ never written to the `.o` (our `as` matches this).  A branch/reference whose
 target therefore has no named symbol gets an **objdump-style synthetic label**
 `.L<addr>`, emitted at the definition and used by every reference -- so the
 disassembly stays readable and reassembles.
+### Code/data separation (recursive descent)
+
+A linear sweep mis-decodes data embedded in the text segment (jump tables, a
+`jsr r5,error; 'x' char argument whose byte value is itself a `jmp' opcode) as
+instructions, which fabricates bogus far branch targets that `as' then rejects.
+das instead walks the actual **control flow** from every defined text symbol
+(plus absolute text pointers, i.e. jump-table entries) to map which bytes are
+reachable as code; the rest is emitted as data words.  A multi-word decode that
+would straddle a known branch target is treated as data, and a relocated word
+where an opcode should be (a `sys'/inline argument) is data too.  Compiler
+output (clean code/data separation) is unaffected; the win is hand-written
+assembly that interleaves data with code.
+
 The `sys' macro (`as''s name for the `trap' instruction) can carry inline
 argument words -- `sys 0; 9f' is the trap plus the address of `9:'.  das spots
 these because a relocated word where an opcode should be is inline data, not
