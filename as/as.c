@@ -60,6 +60,9 @@ struct sym {
 };
 #define SF_GLOBL 01
 #define SF_DEF 02
+#define SF_REG  04		/* symbol aliased to a register (`lp = r5') */
+
+int termreg;			/* set by term/expr when the value is a bare register */
 
 #define NHASH 1023
 struct sym *htab[NHASH];
@@ -202,7 +205,7 @@ struct sym *exsym;		/* set by term/expr when result is external */
 long expr();
 long term(segp) int *segp; {
 	int t=lex(); long v; struct sym *sp;
-	exsym=0; *segp=SABS;
+	exsym=0; *segp=SABS; termreg=0;
 	if(t=='-'){ v=term(segp); return -v; }
 	if(t=='+'){ return term(segp); }	/* unary plus (e.g. `+2(r0)') */
 	if(t=='~'){ v=term(segp); return ~v; }
@@ -214,20 +217,21 @@ long term(segp) int *segp; {
 		if(strcmp(tokname,".")==0){ *segp=curseg+1; return dot[curseg]; }
 		if(strcmp(tokname,"..")==0){ *segp=SABS; return 0; }	/* reloc base placeholder */
 		/* register (024) and absolute (01) keywords carry their value */
-		if(tokkw&&(tokkw->type==024||tokkw->type==01)) return tokkw->opcode;
+		if(tokkw&&(tokkw->type==024||tokkw->type==01)){ if(tokkw->type==024)termreg=1; return tokkw->opcode; }
 		sp=lookup(tokname);
-		if(sp->flags&SF_DEF){ *segp=sp->seg; return sp->value; }
+		if(sp->flags&SF_DEF){ *segp=sp->seg; if(sp->flags&SF_REG)termreg=1; return sp->value; }
 		*segp=SEXT; exsym=sp; return 0;
 	}
 	aerror("bad expression"); return 0;
 }
 long expr(segp) int *segp; {
 	int seg,seg2; long v,v2; struct sym *es;
-	v=term(&seg); es=exsym;
+	int reg;
+	v=term(&seg); es=exsym; reg=termreg;	/* a bare register, until an operator applies */
 	for(;;){
 		int t=peek();
 		if(t=='+'||t=='-'||t=='*'||t=='/'||t=='&'||t=='|'||t=='%'||t=='^'||t=='!'||t==TLSH||t==TRSH){
-			lex(); v2=term(&seg2);
+			lex(); v2=term(&seg2); reg=0;
 			switch(t){
 			/* the segment checks fire only in pass 2: a forward reference is an
 			 * undefined SEXT in pass 1 but may resolve to an absolute symbol
@@ -243,7 +247,7 @@ long expr(segp) int *segp; {
 			}
 		} else break;
 	}
-	*segp=seg; exsym=es; return v;
+	*segp=seg; exsym=es; termreg=reg; return v;
 }
 
 /* ---------------- emission ---------------- */
@@ -298,7 +302,14 @@ struct sym *xsym;
  */
 struct operand { int mode; int hasx; long xval; int xseg; struct sym *xsym; int pcrel; };
 
-int regof(){ if(tok==TID && tokkw && tokkw->type==024) return tokkw->opcode; return -1; }
+int regof(){
+	if(tok==TID && tokkw && tokkw->type==024) return tokkw->opcode;	/* r0..r5/sp/pc */
+	if(tok==TID && !tokkw){						/* a symbol aliased to a register */
+		struct sym *sp=lookup(tokname);
+		if((sp->flags&(SF_DEF|SF_REG))==(SF_DEF|SF_REG)) return sp->value & 7;
+	}
+	return -1;
+}
 
 void getop(o)
 struct operand *o;
@@ -455,7 +466,8 @@ void assemble()
 					 * on top of the reserved space. */
 					while(dot[curseg] < v) emitbyte(0);
 					if(dot[curseg] > v) dot[curseg]=v;	/* backward (rare) */
-				} else { struct sym*sp=lookup(name); sp->flags|=SF_DEF; sp->seg=seg; sp->value=v; }
+				} else { struct sym*sp=lookup(name); sp->flags|=SF_DEF; sp->seg=seg; sp->value=v;
+					if(termreg) sp->flags|=SF_REG; else sp->flags&=~SF_REG;	/* `lp = r5' */ }
 				continue;
 			}
 			unlex();		/* push t2 back: it starts the operands/expression */
