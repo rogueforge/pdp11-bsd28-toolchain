@@ -601,8 +601,17 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 		if((relat(tbase+addr)&016) || (Mark && Mark[addr]!=1)){
 			if(!symword(tbase+addr, addr, buf)) sprintf(buf,"%o",w16(tbase+addr));
 			len=2;
-		} else
+		} else {
 			len=decode(tbase+addr, addr, buf);
+			/* a multi-word instruction must not straddle the text end: the last
+			 * word is data, not the opcode of an instruction whose operand word
+			 * lies past .text (V6 dsw.s ends in a bare 005077, not `clr @#...').
+			 * Emitting the phantom operand would grow .text and shift bss. */
+			if(addr+len > a1){
+				if(!symword(tbase+addr, addr, buf)) sprintf(buf,"%o",w16(tbase+addr));
+				len=2;
+			}
+		}
 		if(Asm){ fprintf(out, "\t%s\n", buf); addr+=len; continue; }
 		fprintf(out, "\t%06o:  ", addr);
 		for(i=0;i<len;i+=2) fprintf(out, "%06o ", w16(tbase+addr+i));
