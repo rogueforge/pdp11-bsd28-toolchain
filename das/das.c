@@ -644,9 +644,12 @@ static void dump_bss(int a0, int size, FILE *out)
 {
 	int addr=a0, end=a0+size;
 	while(addr<end){
-		int next=addr+2;
+		int next=addr+1;
 		labels(addr, N_BSS, out);
-		while(next<end && !haslabel(next,N_BSS)) next+=2;
+		/* byte-granular: bss variables can be `.byte'-sized and sit at odd
+		 * addresses (m40.s has bflg/jflg/fflg/nofault in four adjacent bytes);
+		 * a word-step scan would skip the odd ones and shift every later addr */
+		while(next<end && !haslabel(next,N_BSS)) next++;
 		fprintf(out, "\t.=.+%o\n", next-addr);
 		addr=next;
 	}
