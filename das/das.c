@@ -443,6 +443,51 @@ static void labels(int addr, int seg, FILE *out)
 	if(in_aux(addr) && segof(addr)==seg) fprintf(out, "%s:\n", synthname(addr));	/* objdump-style .L<addr> */
 }
 
+/* Could [g0,g1) be a run of instructions?  A pc-relative relocation only ever
+ * sits on an instruction OPERAND (data is never pc-relative), so a clean decode
+ * must consume every pcrel word as an operand -- never land an instruction
+ * boundary on one -- and must tile the gap exactly.  This recovers code the
+ * control-flow walk cannot reach (e.g. interrupt handlers entered only through
+ * hardware vectors), and rejects data: a misaligned/data decode trips the test.
+ * (A false positive is still harmless: a self-consistent decode reassembles to
+ * the identical bytes.) */
+static int gap_is_code(long tbase, int g0, int g1)
+{
+	int pc, sawpc=0, ok=1; char buf[120];
+	unsigned char *start = calloc((g1-g0)/2 + 1, 1);	/* start[(a-g0)/2]: 1=instr */
+	if(!start) return 0;
+	/* pass 1: decode, recording instruction starts; reject obvious misalignment */
+	for(pc=g0; pc<g1; ){
+		int rel=relat(tbase+pc), len, k;
+		if(rel&016){				/* relocated word at a boundary */
+			if(rel&1){ ok=0; break; }	/* a pcrel operand as an opcode => misaligned */
+			pc+=2; continue;		/* absolute inline data (sys arg / pointer) */
+		}
+		len=decode(tbase+pc, pc, buf); if(len<2) len=2;
+		if(pc+len>g1){ ok=0; break; }		/* straddles the gap end => misaligned */
+		start[(pc-g0)/2]=1;
+		for(k=2;k<len;k+=2) if(relat(tbase+pc+k)&1) sawpc=1;	/* pcrel operand */
+		pc+=len;
+	}
+	if(!ok || pc!=g1 || !sawpc){ free(start); return 0; }
+	/* pass 2: every branch/call/jump must reach a real instruction boundary --
+	 * inside the gap a recorded start, outside it already-marked code (Mark==1).
+	 * Data decoded as code (e.g. inline char args mixed in) lands a branch
+	 * mid-instruction and is rejected here. */
+	for(pc=g0; pc<g1; ){
+		int rel=relat(tbase+pc), len, t;
+		if((rel&016) && !(rel&1)){ pc+=2; continue; }
+		len=decode(tbase+pc, pc, buf); if(len<2) len=2;
+		if((CFtype==CF_COND||CFtype==CF_JUMP||CFtype==CF_CALL) && (t=CFtarg)>=0){
+			if(t>=g0 && t<g1){ if(start[(t-g0)/2]!=1){ ok=0; break; } }	/* in-gap: a boundary */
+			else if(t>=Tsize){ ok=0; break; }	/* outside: at least a valid text address */
+		}
+		pc+=len;
+	}
+	free(start);
+	return ok;
+}
+
 /* Recursive-descent: walk control flow from every defined text symbol and mark
  * each reachable instruction's bytes (Mark[a]=1 at a start).  Unreached bytes
  * (jump tables, inline char/string args) stay 0 and are emitted as data. */
@@ -507,6 +552,27 @@ static void markcode(long tbase, int a1)
 			if(CFtype==CF_JUMP || CFtype==CF_STOP) break;	/* no fall-through */
 			pc+=len;
 		}
+	}
+	/* recover unreached code: a gap that carries pc-relative relocations is
+	 * instruction operands, so it is code -- commit it only if it decodes as a
+	 * self-consistent run of instructions (gap_is_code). */
+	{ int a=0;
+	  while(a<a1){
+		int g0;
+		if(Mark[a]!=0){ a+=2; continue; }
+		g0=a;
+		while(a<a1 && Mark[a]==0) a+=2;		/* gap [g0,a) */
+		if(gap_is_code(tbase, g0, a)){
+			int pc=g0; char buf[120];
+			while(pc<a){
+				int len, k, rel=relat(tbase+pc);
+				if((rel&016) && !(rel&1)){ Mark[pc]=2; if(pc+1<a)Mark[pc+1]=2; pc+=2; continue; }
+				len=decode(tbase+pc, pc, buf); if(len<2) len=2;
+				Mark[pc]=1; for(k=1;k<len && pc+k<a;k++) Mark[pc+k]=2;
+				pc+=len;
+			}
+		}
+	  }
 	}
 	free(q);
 }
