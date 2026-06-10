@@ -513,6 +513,15 @@ void assemble()
 					continue;
 				}
 			}
+			/* a register name (type 024) as a statement is an expression, not an
+			 * instruction: a register is a symbol with value 0..7, so a bare `r0'
+			 * emits `.word 0'.  V6's Fortran compiler passes register numbers this
+			 * way -- `jsr r5,code; <fmt>; r0; r3' (code reads the inline args). */
+			if(kw && kw->type==024){
+				pushtok(TID, 0, name, kw);
+				{ int seg; long v=expr(&seg); doword(v,seg,exsym); }
+				continue;
+			}
 			if(kw){
 				switch(kw->type){
 				case 01:  /* absolute no-operand insn: setd/clc/sec/cfcc... */
