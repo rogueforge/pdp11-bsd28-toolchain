@@ -75,6 +75,53 @@ static const char *fsym_name(int off)
 /* sign-extend a 16-bit octal/decimal offset to a host int */
 static int soff(int v){ v&=0xffff; return v>=0x8000 ? v-0x10000 : v; }
 
+/* --------------------------------------------------------- symbol map file */
+/* A stripped binary has no names.  We rebuild them incrementally and feed them
+ * back in: a map file (`-m FILE') keyed by the NATIVE PDP-11 address.  das emits
+ * those addresses as octal `.L<addr>' synthetic labels; the map gives each a
+ * name.  As functions/globals are identified, add lines and re-run -- dcc
+ * substitutes the name everywhere the address appears.  Two line formats:
+ *   f  name  size  0xADDR      (radare2 flag file, e.g. rogue's symbols_34.r2)
+ *   0xADDR|0ADDR  name         (plain) */
+struct mapent { int addr; char name[80]; };
+static struct mapent Map[16000]; static int NMap;
+
+static void add_map(int addr, const char *name)
+{
+	const char *n = (name[0]=='_') ? name+1 : name;	/* drop the assembly `_' */
+	if(NMap<16000){ Map[NMap].addr=addr; strncpy(Map[NMap].name,n,79); NMap++; }
+}
+static void load_map(const char *path)
+{
+	FILE *f=fopen(path,"r"); char buf[256], a0[16], nm[80], sz[32], ad[32];
+	if(!f){ fprintf(stderr,"dcc: cannot open map %s\n",path); return; }
+	while(fgets(buf,sizeof buf,f)){
+		if(buf[0]=='#'||buf[0]==';'||buf[0]=='\n') continue;
+		if(sscanf(buf,"%15s %79s %31s %31s",a0,nm,sz,ad)==4 && !strcmp(a0,"f"))
+			add_map((int)strtol(ad,0,0),nm);		/* r2: f name size addr */
+		else if(sscanf(buf,"%31s %79s",ad,nm)==2)
+			add_map((int)strtol(ad,0, (ad[0]=='0'&&(ad[1]=='x'||ad[1]=='X'))?16:8), nm);
+	}
+	fclose(f);
+	fprintf(stderr,"dcc: loaded %d symbols from %s\n",NMap,path);
+}
+static const char *mapname(int addr)
+{
+	int i; for(i=0;i<NMap;i++) if(Map[i].addr==addr) return Map[i].name;
+	return 0;
+}
+/* render a code/data target token (.L<oct>, *$<oct>, *$_name, _name) as a C
+ * identifier, applying the map; `pfx' (fn_/g_) names an unmapped synthetic */
+static const char *symname(const char *tok, const char *pfx)
+{
+	static char b[96]; const char *m;
+	if(!strncmp(tok,"*$_",3)){ strcpy(b,tok+3); return b; }	/* unstripped symbol */
+	if(tok[0]=='_'){ strcpy(b,tok+1); return b; }
+	if(!strncmp(tok,".L",2)){ int a=(int)strtol(tok+2,0,8); if((m=mapname(a))) strcpy(b,m); else sprintf(b,"%s%s",pfx,tok+2); return b; }
+	if(!strncmp(tok,"*$",2)){ int a=(int)strtol(tok+2,0,8); if((m=mapname(a))) strcpy(b,m); else sprintf(b,"%s%s",pfx,tok+2); return b; }
+	strcpy(b,tok); return b;
+}
+
 /* canonical C name for an r5-relative frame slot: a parameter (positive even
  * offset 4,6,8,...) or a local (negative).  Used for both the signature and the
  * operands so they agree. */
@@ -89,16 +136,45 @@ static const char *vname(int off)
 }
 
 /* ----------------------------------------------------- recognition / parse */
+/* The C runtime: `csv'/`cret' when symbols are present, else the single dominant
+ * `jsr r5,<addr>' / `jmp <addr>' targets every function shares (a stripped a.out,
+ * e.g. our rogue3.4 target, still has the code -- just no names). */
+static char Csv[80]="csv", Cret[80]="cret";
+
+/* the target of `jsr r5,X' or a single-operand `jmp X', into `out' */
+static int op_of(char *line, const char *mn, int after_r5, char *out)
+{
+	char *p=skipws(line), *o=out;
+	if(strncmp(p,mn,strlen(mn))) return 0;
+	p=skipws(p+strlen(mn));
+	if(after_r5){ if(strncmp(p,"r5,",3)) return 0; p+=3; }
+	while(*p && *p!=' ' && *p!='\t' && *p!=',' && o<out+78) *o++=*p++; *o=0;
+	if(*p && *p!=' ' && *p!='\t') return 0;		/* not a lone operand */
+	return out[0]!=0;
+}
+
 static int looks_like_cc(void)
 {
-	int i, csv=0, cret=0, tilde=0;
+	static struct { char t[80]; int n; } jr[6000], jm[6000];
+	int njr=0, njm=0, i, j, lit=0; char t[80];
 	for(i=0;i<NLine;i++){
-		char *p=skipws(Line[i]);
-		if(strstr(p,"jsr\tr5,csv")||strstr(p,"jsr r5,csv")) csv++;
-		if(!strncmp(p,"jmp\tcret",8)||!strncmp(p,"jmp cret",8)) cret++;
-		if(p[0]=='~'&&p[1]=='~') tilde++;
+		if(op_of(Line[i],"jsr",1,t)){
+			if(!strcmp(t,"csv")) lit|=1;
+			for(j=0;j<njr;j++) if(!strcmp(jr[j].t,t)){ jr[j].n++; break; }
+			if(j==njr && njr<6000){ strcpy(jr[njr].t,t); jr[njr].n=1; njr++; }
+		}
+		if(op_of(Line[i],"jmp",0,t)){
+			if(!strcmp(t,"cret")) lit|=2;
+			for(j=0;j<njm;j++) if(!strcmp(jm[j].t,t)){ jm[j].n++; break; }
+			if(j==njm && njm<6000){ strcpy(jm[njm].t,t); jm[njm].n=1; njm++; }
+		}
 	}
-	return csv && cret && tilde;	/* the c0/c1 fingerprint */
+	if(lit==3){ strcpy(Csv,"csv"); strcpy(Cret,"cret"); return 1; }	/* unstripped */
+	{ int best=-1,bn=0; for(j=0;j<njr;j++) if(jr[j].n>bn){bn=jr[j].n;best=j;}
+	  if(best<0||bn<3) return 0; strcpy(Csv,jr[best].t); }		/* stripped: csv */
+	{ int best=-1,bn=0; for(j=0;j<njm;j++) if(jm[j].n>bn){bn=jm[j].n;best=j;}
+	  if(best<0||bn<3) return 0; strcpy(Cret,jm[best].t); }		/* stripped: cret */
+	return 1;
 }
 
 /* a label line `foo:' -> returns the label (without colon) in a static buf */
@@ -108,6 +184,26 @@ static char *labelof(char *line)
 	if(!*p) return 0;
 	while(*p && *p!=':' && *p!=' ' && *p!='\t' && q<b+126) *q++=*p++;
 	if(*p==':'){ *q=0; return b; }
+	return 0;
+}
+
+/* Is line `i' a function entry?  A label whose first real instruction is the
+ * csv prologue.  Sets `name': the symbol (stripped of `_'), or fn_<addr> for a
+ * synthetic `.L<addr>' label das emits when there are no symbols. */
+static int func_entry_name(int i, char *name)
+{
+	char lab[128], t[80], *l=labelof(Line[i]); int k;
+	if(!l) return 0;
+	strncpy(lab,l,127); lab[127]=0;
+	for(k=i+1; k<NLine && k<i+6; k++){
+		char *p=skipws(Line[k]);
+		if(labelof(Line[k])||p[0]=='.'||p[0]==0||p[0]=='~') continue;  /* labels/aliases */
+		if(op_of(Line[k],"jsr",1,t) && !strcmp(t,Csv)){
+			strcpy(name, symname(lab,"fn_"));	/* map -> real name, else fn_<addr> */
+			return 1;
+		}
+		return 0;	/* first instruction is not the prologue */
+	}
 	return 0;
 }
 
@@ -195,11 +291,14 @@ static void emit_insn(FILE *out, struct insn *ins)
 	char *mn=ins->mn, ra[256], rb[256];
 	const char *cc;
 
+	/* the csv prologue is the function entry, not a statement */
+	if(!strcmp(mn,"jsr") && !strcmp(ins->a,"r5") && !strcmp(ins->b,Csv)) return;
+
 	/* control flow */
 	if(!strcmp(mn,"jmp")||!strcmp(mn,"jbr")||!strcmp(mn,"br")){
 		/* let r0 keep flowing across the jump so a value computed just before a
 		 * `jmp <epilogue>' survives to the `jmp cret' return */
-		if(!strcmp(ins->a,"cret")){
+		if(!strcmp(ins->a,Cret)){
 			if(Reg[0][0]) fprintf(out,"\treturn %s;\n",Reg[0]);
 			else fprintf(out,"\treturn;\n");
 		} else fprintf(out,"\tgoto %s;\n",ins->a);
@@ -219,8 +318,8 @@ static void emit_insn(FILE *out, struct insn *ins)
 
 	/* a call: jsr pc,*$_func -> r0 = func(args) */
 	if(!strcmp(mn,"jsr") && !strcmp(ins->a,"pc")){
-		char fn[128], call[512]; int i; const char *p=ins->b;
-		if(!strncmp(p,"*$_",3)) strcpy(fn,p+3); else strcpy(fn,p);
+		char fn[128], call[512]; int i;
+		strcpy(fn, symname(ins->b,"fn_"));	/* map -> real name, else fn_<addr> */
 		sprintf(call,"%s(",fn);
 		for(i=NArgs-1;i>=0;i--){ strcat(call,Args[i]); if(i) strcat(call,", "); }
 		strcat(call,")");
@@ -303,19 +402,18 @@ static void decompile(FILE *out)
 	{
 		int inseg=0;	/* 0=none 1=text 2=data */
 		for(i=0;i<NLine;i++){
-			char *p=skipws(Line[i]), *lab;
+			char *p=skipws(Line[i]), *lab, fnbuf[128];
 			if(!strncmp(p,".text",5)){ inseg=1; continue; }
 			if(!strncmp(p,".data",5)||!strncmp(p,".bss",4)){ inseg=2; continue; }
 
-			if(inseg==1 && (lab=labelof(Line[i])) && lab[0]=='_'){
-				int end, maxp=0, j; char fname[128];
-				strcpy(fname,lab);	/* labelof's static buffer is reused below */
-				/* the body runs to the next text function or a segment change;
+			if(inseg==1 && func_entry_name(i,fnbuf)){
+				int end, maxp=0, j; char tt[128];
+				/* the body runs to the next function entry or a segment change;
 				 * scan it for the frame parameters actually referenced (4,6,...) */
 				for(end=i+1; end<NLine; end++){
-					char *e=skipws(Line[end]), *el=labelof(Line[end]), *q=Line[end];
+					char *e=skipws(Line[end]), *q=Line[end];
 					if(!strncmp(e,".data",5)||!strncmp(e,".bss",4)||!strncmp(e,".text",5)) break;
-					if(el && el[0]=='_') break;
+					if(func_entry_name(end,tt)) break;
 					while((q=strstr(q,"(r5)"))){
 						char *s=q; int off;
 						while(s>Line[end] && isdigit((unsigned char)s[-1])) s--;
@@ -325,7 +423,7 @@ static void decompile(FILE *out)
 					}
 				}
 				/* signature + K&R parameter declarations */
-				fprintf(out,"%s(",fname+1);
+				fprintf(out,"%s(",fnbuf);
 				for(j=4;j<=maxp;j+=2) fprintf(out,"%s%s",vname(j),j+2<=maxp?", ":"");
 				fprintf(out,")\n");
 				for(j=4;j<=maxp;j+=2) fprintf(out,"\tint %s;\n",vname(j));
@@ -383,6 +481,11 @@ int main(int argc, char **argv)
 
 	if(argc<2) usage();
 	strncpy(Argv0,argv[0],1199); Argv0[1199]=0;
+	while(argc>2 && argv[1][0]=='-'){		/* -m MAPFILE (repeatable) */
+		if(!strcmp(argv[1],"-m")){ load_map(argv[2]); argc-=2; argv+=2; }
+		else { argc--; argv++; }
+	}
+	if(argc<2) usage();
 	path=argv[1];
 
 	/* .s -> decompile directly */
