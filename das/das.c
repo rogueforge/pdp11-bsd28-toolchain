@@ -267,6 +267,9 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 			l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_BSS);
 			if(l)sprintf(out,"%s",l);
 			else if(offref(targ,wo,out)) ;		/* named symbol + offset */
+			/* a pc-relative reference relocated RABS targets a fixed ABSOLUTE
+			 * address (e.g. a kernel hardware location), not a local label */
+			else if(relat(wo) && (relat(wo)&016)==RABS) sprintf(out,"%o",targ);
 			else if((l=orsynth(0,targ))) sprintf(out,"%s",l);	/* .L<addr> */
 			else sprintf(out,"%o",targ); }
 		else sprintf(out,"%o(%s)",x&0177777,rn);
