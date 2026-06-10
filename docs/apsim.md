@@ -7,7 +7,9 @@ produced toolchain -- it is a test aid, like the GNU `objdump` oracle.
 It loads a classic 2.8BSD a.out (0407/0410/0411) into a 64 KB address space,
 executes PDP-11 instructions (the full general-register set, all eight
 addressing modes, double/single-operand, branches, JSR/RTS/SOB, the EIS
-MUL/DIV/ASH, condition codes), and emulates the handful of 2BSD `sys` traps
+MUL/DIV/ASH, condition codes, and the **FP11 floating-point unit** -- the six
+accumulators as host doubles converting to/from DEC F/D format, the float
+arithmetic/compare/convert ops, and the FP status), and emulates the 2BSD `sys` traps
 the libc stubs issue -- both the direct form (`sys exit`) and the indirect
 form (`sys 0; argblock`) used by write/read/etc.  Implemented calls: exit,
 write, read, open, close, creat, lseek (enough for stdio-free programs).

@@ -55,12 +55,15 @@ instruction, addressing mode, jump target, and immediate decodes correctly
 (`tests/as/encode.sh`), and `cc -c hello.c` now produces a valid object
 end to end.
 
-## Known gaps (for the libc stage)
+## Status / known gaps
 
-- **Numeric local labels** (`1:`, `1f`, `1b`) are not yet supported. c1 uses
-  named `L%d:` labels, so this does not affect compiler output, but libc's
-  hand-written assembly uses them.
-- Floating-point and a few rare directives are unverified.
+- **FP11 floating-point instructions are supported** (movf/movof/movfo,
+  addf/subf/mulf/divf/cmpf/modf, clrf/tstf/negf/absf, movif/movfi/movei/movie,
+  cfcc/setf/setd/ldfps) -- encodings verified against the binutils oracle and
+  run in apsim.
+- Numeric local labels (`1:`/`1f`/`1b`), multi-file input, the `..` relocation
+  base, and unary `+`/`!` were all added for libc's hand-written assembly.
+- A few rare directives outside what cc/libc emit remain unverified.
 - Span-dependent jumps are not shortened (always long form).
 
 ## Build

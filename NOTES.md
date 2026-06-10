@@ -143,7 +143,8 @@ VAX project has these we do not:
   ship `cmd/lint`; a real port, multi-week.)
 - **libcurses + libtermlib** — terminal UI / termcap. (2.8BSD has both.)
 - **Profiling startup** — `mcrt0.o`/`gcrt0.o` from `gen/mon.c` + `sys/profil`.
-- **FP startup variants** — `fcrt0.o` etc. (we stub floats, so deferred).
+- **Profiling/overlay crt0 variants** — `mcrt0.o`/`fcrt0.o`/split-I&D etc.; we
+  ship one `crt0.o` (which already does `setd` for float).
 - **A canonical large-program test** (the VAX tree builds `rogue`); ours could
   use one once the libc is fuller.
 
