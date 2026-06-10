@@ -14,8 +14,8 @@ pdp11-bsd28-das -a file      # emit reassemblable `as' source instead of a listi
 With `-a`, das emits clean `as` source (no address/byte columns, `/` comments,
 `.globl` declarations) that **reassembles to a byte-identical object**.  It is
 the true inverse of `as` for this toolchain: across the whole libc all 117
-objects round-trip with byte-identical text+data; 79 (including every
-compiler-generated object) are identical down to the relocation as well.  This
+objects round-trip with byte-identical text+data, and 103 are identical down to
+the relocation as well.  This
 requires reading the **relocation table** so each relocated operand comes back
 as a symbol (`jsr pc,*$_doprnt`, `mov $__iob+12,(sp)`) rather than a raw word.
 
@@ -23,8 +23,12 @@ as a symbol (`jsr pc,*$_doprnt`, `mov $__iob+12,(sp)`) rather than a raw word.
 `\001<num>_<instance>`; das reconstructs it as `1:` for the definition and
 `1f`/`1b` for references (forward/backward), which `as` re-mangles to the same
 symbol -- so even hand-written assembly with numeric local labels round-trips.
-The residual reloc-only differences in the remaining stubs come from the `sys`
-macro's inline-argument convention, which the object file doesn't record.
+The `sys' macro (`as''s name for the `trap' instruction) can carry inline
+argument words -- `sys 0; 9f' is the trap plus the address of `9:'.  das spots
+these because a relocated word where an opcode should be is inline data, not
+code, and restores it (`sys 0' / `9f', `mov 6(r5),0f+2').  The few remaining
+reloc-only differences are data string-pointer tables whose entries target odd
+byte offsets, which the word-granular data dump cannot label.
 
 ## What it does
 

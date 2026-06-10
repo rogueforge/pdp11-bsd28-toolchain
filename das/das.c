@@ -90,6 +90,46 @@ static char *locref(char *name, int targ, int ref)	/* Nf / Nb */
 
 static int Iaddr;	/* address of the instruction currently being decoded */
 
+/* nearest defined label at or below `val' in segment `seg' (for symbol+offset
+ * references like `0f+2'); returns its name (and *base = its value) or 0. */
+static char *nearestlabel(int val, int seg, int *base)
+{
+	int i, best=-1;
+	for(i=0;i<NSym;i++){
+		if(BASETYPE(Sym[i].type)!=seg || !Sym[i].name[0]) continue;
+		if((Sym[i].value&0xffff)>(val&0xffff)) continue;
+		if(best<0 || Sym[i].value>Sym[best].value
+		   || (Sym[i].value==Sym[best].value && ISEXT(Sym[i].type))) best=i;
+	}
+	if(best<0) return 0;
+	*base=Sym[best].value;
+	return Sym[best].name;
+}
+
+/* Format the relocated word at file offset `wo' as a symbolic reference
+ * (`sym', `sym+off', or `Nf+off') so it reassembles with the same relocation.
+ * `ref' is the referring address (for local-label forward/backward).  0 if the
+ * word carries no usable relocation. */
+static int symword(long wo, int ref, char *out)
+{
+	int rel=relat(wo), val=w16(wo), type=rel&016, base; char *nm;
+	if(type==REXT && (rel>>4)<NSym){
+		nm=Sym[rel>>4].name;
+		if(val) sprintf(out,"%s+%o",nm,val&0177777); else strcpy(out,nm);
+		return 1;
+	}
+	if(type==002 || type==004 || type==006){	/* RTEXT/RDATA/RBSS */
+		int seg = type==002?N_TEXT : type==004?N_DATA : N_BSS;
+		if((nm=nearestlabel(val,seg,&base))!=0){
+			nm=locref(nm, base, ref);
+			if(((val-base)&0xffff)) sprintf(out,"%s+%o",nm,(val-base)&0xffff);
+			else strcpy(out,nm);
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* Best label for an address in a given segment (N_TEXT/N_DATA/N_BSS base).
  * Prefers an exact match, external over local; returns 0 if none. */
 static char *labelat(int addr, int seg)
@@ -128,6 +168,25 @@ static char *regname(int r)	/* pc/sp idioms for r7/r6 */
 	return b;
 }
 
+/* An internal (text/data/bss) reference whose resolved target is `targ' but
+ * has no exact label -> `nearest+offset' (e.g. `0f+2'), keyed by the operand
+ * word's relocation type at `wo'.  Returns 0 if not so relocated. */
+static int offref(int targ, long wo, char *out)
+{
+	int base, seg; char *nm;
+	switch(relat(wo)&016){
+	case 002: seg=N_TEXT; break;
+	case 004: seg=N_DATA; break;
+	case 006: seg=N_BSS;  break;
+	default:  return 0;
+	}
+	if((nm=nearestlabel(targ,seg,&base))==0) return 0;
+	nm=locref(nm, base, Iaddr);
+	if((targ-base)&0xffff) sprintf(out,"%s+%o",nm,(targ-base)&0xffff);
+	else strcpy(out,nm);
+	return 1;
+}
+
 static void fmtop(int spec, long *po, int *paddr, char *out)
 {
 	int mode=(spec>>3)&7, reg=spec&7, x, targ;
@@ -159,16 +218,21 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 			if(relexp(wo,(x+*paddr)&0xffff,"%s",out)) break;
 			targ=(*paddr + (short)x)&0xffff;
 			l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_BSS);
-			if(l)sprintf(out,"%s",l); else sprintf(out,"%o",targ); }
+			if(l)sprintf(out,"%s",l);
+			else if(offref(targ,wo,out)) ;		/* nearest+offset (0f+2) */
+			else sprintf(out,"%o",targ); }
 		else sprintf(out,"%o(%s)",x&0177777,rn);
 		break;
 	case 7:
 		wo=*po; x=w16(*po); *po+=2; *paddr+=2;
 		if(reg==7){
+			char o7[40];
 			if(relexp(wo,(x+*paddr)&0xffff,"*%s",out)) break;
 			targ=(*paddr + (short)x)&0xffff;
 			l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_TEXT);
-			if(l)sprintf(out,"*%s",l); else sprintf(out,"*%o",targ); }
+			if(l)sprintf(out,"*%s",l);
+			else if(offref(targ,wo,o7)) sprintf(out,"*%s",o7);
+			else sprintf(out,"*%o",targ); }
 		else sprintf(out,"*%o(%s)",x&0177777,rn);
 		break;
 	}
@@ -328,7 +392,15 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 	while(addr<a1){
 		int len, i;
 		labels(addr, N_TEXT, out);
-		len=decode(tbase+addr, addr, buf);
+		/* a relocated word where an opcode should be is inline data (e.g. a
+		 * `sys' macro's argument: `sys 0; 9f' is the trap then the addr of
+		 * 9:), not code -- opcodes are never relocated.  Emit it symbolically
+		 * so the relocation survives the round-trip. */
+		if(relat(tbase+addr)&016){
+			if(!symword(tbase+addr, addr, buf)) sprintf(buf,"%o",w16(tbase+addr));
+			len=2;
+		} else
+			len=decode(tbase+addr, addr, buf);
 		if(Asm){ fprintf(out, "\t%s\n", buf); addr+=len; continue; }
 		fprintf(out, "\t%06o:  ", addr);
 		for(i=0;i<len;i+=2) fprintf(out, "%06o ", w16(tbase+addr+i));
@@ -343,11 +415,14 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 static void disasm_data(long dbase, int a0, int size, FILE *out)
 {
 	int addr=a0, end=a0+size;
-	char sym[40];
+	char sym[48];
 	while(addr<end){
 		long wo=dbase+(addr-a0);
 		labels(addr, N_DATA, out);
 		if(Asm){
+			/* Only EXTERNAL pointers are symbolized in data: an internal
+			 * pointer can target an odd byte offset (string tables), which
+			 * the word-granular dump cannot label, so keep its raw value. */
 			if(relexp(wo,w16(wo),"%s",sym)) fprintf(out, "\t%s\n", sym);
 			else fprintf(out, "\t%o\n", w16(wo));
 		} else
