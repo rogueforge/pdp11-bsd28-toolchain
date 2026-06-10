@@ -95,7 +95,7 @@ struct sym *lookup(name) char *name; {
 }
 
 /* ---------------- lexer ---------------- */
-enum { TEOF=256, TNL, TID, TNUM, TSTR };
+enum { TEOF=256, TNL, TID, TNUM, TSTR, TLSH, TRSH };	/* \< \> shift operators */
 char *ip;
 int tok; long tokval; char tokname[64]; struct op *tokkw; char tokstr[1024]; int tokslen;
 /* token pushback stack (LIFO) */
@@ -188,6 +188,9 @@ again:
 		if(*ip)ip++;
 		return tok=TSTR;
 	}
+	if(c=='\\' && (ip[1]=='<'||ip[1]=='>')){	/* \< left shift, \> right shift */
+		int s=ip[1]; ip+=2; return tok=(s=='<')?TLSH:TRSH;
+	}
 	ip++;
 	return tok=c;
 }
@@ -223,7 +226,7 @@ long expr(segp) int *segp; {
 	v=term(&seg); es=exsym;
 	for(;;){
 		int t=peek();
-		if(t=='+'||t=='-'||t=='*'||t=='/'||t=='&'||t=='|'||t=='%'||t=='^'){
+		if(t=='+'||t=='-'||t=='*'||t=='/'||t=='&'||t=='|'||t=='%'||t=='^'||t=='!'||t==TLSH||t==TRSH){
 			lex(); v2=term(&seg2);
 			switch(t){
 			case '+': v+=v2; if(seg==SABS){seg=seg2;es=exsym;} else if(seg2!=SABS)aerror("non-abs in +"); break;
@@ -231,6 +234,9 @@ long expr(segp) int *segp; {
 			case '*': v*=v2; break; case '/': if(v2)v/=v2; break;
 			case '%': if(v2)v%=v2; break;
 			case '&': v&=v2; break; case '|': v|=v2; break; case '^': v^=v2; break;
+			case '!': v+=~v2; break;			/* 2BSD as: a!b = a + ~b */
+			case TLSH: v<<=(v2&037); break;			/* \< left shift */
+			case TRSH: v=(unsigned long)v>>(v2&037); break;	/* \> right shift (logical) */
 			}
 		} else break;
 	}
