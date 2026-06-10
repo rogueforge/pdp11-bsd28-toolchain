@@ -157,12 +157,13 @@ exists on the 2.8BSD PDP-11 and is out of scope.
 startup (crt0/csv/cerror), the long-arithmetic helpers (lmul/ldiv/lrem,
 almul/aldiv/alrem, mcount), the string/memory and numeric routines from
 `gen/` (strcmp/strlen/strcpy/…, atoi/atol/abs, ctype, qsort, getenv, perror,
-…), buffered stdio (printf/fprintf + fopen/fgets/fputs/fgetc/getc/putc/puts/
-ungetc/fseek/ftell/setbuf and the internals), and the common `sys/` syscall
-stubs.  Still out of scope (stubbed or omitted): floating-point printing
-(%f/%e/%g and atof/ecvt/gcvt — PDP-11 floats aren't IEEE), the varargs
-`sprintf`/`scanf` family, the passwd/group database, networking, and the
-overlay/non-FP/profiling build variants.
+…), buffered stdio (printf/fprintf/sprintf + fopen/fgets/fputs/fgetc/getc/
+putc/puts/ungetc/fseek/ftell/setbuf and the internals), the authentic
+free-list malloc/free/realloc, and the common `sys/` syscall stubs.  Still
+out of scope (stubbed or omitted): floating-point printing (%f/%e/%g and
+atof/ecvt/gcvt — PDP-11 floats aren't IEEE) and hence the `scanf` family (its
+number scanner inlines float ops `as` won't assemble), the passwd/group
+database, networking, and the overlay/non-FP/profiling build variants.
 
 ## Development-time references (NOT build dependencies)
 

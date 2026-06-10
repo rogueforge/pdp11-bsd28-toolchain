@@ -84,6 +84,14 @@ EOF
 check_eq "malloc/free/realloc" "realloc preserved=1 b=[block-b]
 reuse=[reused]" "`"$SIM" "$tmp/m" 2>/dev/null`"
 
+# --- sprintf (varargs -> _doprnt into a string) ---------------------------
+cat > "$tmp/sp.c" <<'EOF'
+int main(){ char b[80]; sprintf(b, "%d/%s/%x/%o/%d", 42, "hi", 255, 64, -5);
+	printf("%s\n", b); return 0; }
+EOF
+( cd "$tmp" && "$BIN-cc" sp.c -o sp ) || fail "sprintf: cc failed"
+check_eq "sprintf" "42/hi/ff/100/-5" "`"$SIM" "$tmp/sp" 2>/dev/null`"
+
 # --- getchar/putchar through a pipe ---------------------------------------
 cat > "$tmp/c.c" <<'EOF'
 int main(){ int c; while((c=getchar())>=0) putchar(c); return 0; }

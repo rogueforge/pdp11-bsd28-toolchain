@@ -28,7 +28,7 @@ C library (compiled by our `cc`):
   the authentic free-list `malloc`/`free`/`realloc`).
 - `stdio/` — the full buffered-I/O layer: `printf`/`fprintf` (over the asm
   `_doprnt`), `fopen`/`freopen`/`fdopen`, `fgets`/`fputs`/`fgetc`/`getchar`/
-  `putchar`/`puts`/`gets`, `ungetc`, `fseek`/`ftell`/`rew`, `setbuf`, the
+  `putchar`/`puts`/`gets`, `ungetc`, `fseek`/`ftell`/`rew`, `setbuf`, `sprintf`, the
   internals (`data` `filbuf` `flsbuf` `findiop` `endopen` `rdwr` `strout`
   `clrerr`), and `getw`/`putw`.
 - `sys/` — ~40 syscall stubs (`write` `read` `open` `close` `creat` `lseek`
@@ -42,7 +42,8 @@ C library (compiled by our `cc`):
 
 Floating-point printing (`%f`/`%e`/`%g`, `atof`, `ecvt`, `gcvt` — PDP-11
 floats aren't IEEE; `stdio/fltstub.s` stubs the format hooks), the varargs
-`sprintf`/`scanf` family, the passwd/group database, networking, and the
+`scanf` family (its number scanner inlines float ops `as` won't assemble),
+the passwd/group database, networking, and the
 overlay / non-FP / profiling build variants.
 
 ## Porting notes

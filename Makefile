@@ -254,7 +254,7 @@ LIBC_GENC = strcmp strlen strcpy strcat strncmp strncpy strncat index rindex \
 # stdio/ C sources (the full buffered-I/O layer minus float/varargs/db)
 LIBC_STDIOC = printf fprintf data strout flsbuf fputc fopen freopen fdopen \
 	      fgets fputs fgetc getchar putchar puts gets ungetc fseek ftell rew \
-	      setbuf clrerr filbuf findiop endopen rdwr getw putw
+	      setbuf clrerr filbuf findiop endopen rdwr getw putw sprintf
 # sys/ syscall stubs (assembled with the sys.s number defs)
 LIBC_SYS = write read open close creat lseek exit sbrk unlink fstat stat lstat \
 	   dup pipe fork wait getpid getuid getgid setuid setgid access chmod \
