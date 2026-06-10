@@ -465,11 +465,19 @@ static void markcode(long tbase, int a1)
 		if(BASETYPE(Sym[i].type)==N_TEXT && (Sym[i].value&0xffff)<a1 && qn<qmax)
 			q[qn++]=Sym[i].value&0xffff;
 	/* seeds: absolute text pointers -- a word relocated RTEXT but NOT pc-relative
-	 * holds the address of a code block (a jump-table entry / function pointer)
-	 * that is only reached through a computed jump we cannot follow. */
-	{ int a; for(a=0;a+1<a1;a+=2)
-		if((relat(tbase+a)&017)==002){		/* RTEXT, pcrel bit clear */
+	 * holds the address of a code block (a jump-table entry, function pointer, or
+	 * a handler address an interrupt-vector table points to) only reached through
+	 * a computed jump / hardware vector we cannot follow.  Scan both segments:
+	 * such a pointer table may live in text or data. */
+	{ int a;
+	  for(a=0;a+1<a1;a+=2)			/* text words */
+		if((relat(tbase+a)&017)==002){	/* RTEXT, pcrel bit clear */
 			int v=w16(tbase+a)&0xffff;
+			if(v<a1 && qn<qmax){ Targ[v]=1; q[qn++]=v; }
+		}
+	  for(a=0;a+1<Dsize;a+=2)		/* data words */
+		if((relat(Dbase+a)&017)==002){
+			int v=w16(Dbase+a)&0xffff;
 			if(v<a1 && qn<qmax){ Targ[v]=1; q[qn++]=v; }
 		}
 	}
