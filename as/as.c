@@ -459,15 +459,23 @@ void docomm(){ struct sym*sp; int seg; long sz; if(lex()!=TID){aerror(".comm nam
 void even(){ if(dot[curseg]&1){ emitbyte(0);} }
 void doword(long v,int seg,struct sym*sym){ emitword((v+segbase(seg))&0177777,seg,sym,0); }
 
+int ifdepth, ifoff;	/* .if nesting depth; depth at which assembly is switched off (0=on) */
+
 void assemble()
 {
 	int t;
-	pass = pass;
+	ifdepth=0; ifoff=0;
 	for(;;){
 		t=lex();
 		if(t==TEOF) break;
 		if(t==TNL){ lineno++; continue; }
 		if(t==';') continue;
+		/* conditional assembly: inside a false .if branch, consume each statement
+		 * (still tracking nested .if/.endif) until the matching .endif */
+		if(ifoff && !(t==TID && tokkw && (tokkw->type==021||tokkw->type==022))){
+			while(peek()!=TNL && peek()!=TEOF) lex();
+			continue;
+		}
 		if(t==TSTR){ int i; for(i=0;i<tokslen;i++) emitbyte(tokstr[i]); continue; }  /* bare string = .ascii */
 		if(t==TID){
 			char name[64]; struct op*kw, ckw; int t2;
@@ -546,8 +554,15 @@ void assemble()
 				case 016: dobyte(); break;
 				case 017: doascii(); break;
 				case 020: even(); break;
-				case 021: case 022: /* .if/.endif: skip rest of line */
-					  while(peek()!=TNL&&peek()!=TEOF&&peek()!=';')lex(); break;
+				case 021:  /* .if expr : assemble the body only when expr != 0 */
+					  ifdepth++;
+					  if(ifoff==0){ int seg; long v=expr(&seg); if(v==0) ifoff=ifdepth; }
+					  else while(peek()!=TNL&&peek()!=TEOF&&peek()!=';')lex();
+					  break;
+				case 022:  /* .endif : close the innermost .if */
+					  if(ifoff && ifoff==ifdepth) ifoff=0;
+					  if(ifdepth>0) ifdepth--;
+					  break;
 				case 023: doglobl(); break;
 				case 025: setseg(0); break;
 				case 026: setseg(1); break;
