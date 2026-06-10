@@ -71,22 +71,28 @@ static int relexp(long wo, int addend, char *fmt, char *out)
 	return 0;
 }
 
-/* `as' mangles a numeric local label (1:) into a symbol named "\001<num>_
- * <instance>".  Reconstruct it: a definition prints as "<num>:", a reference
- * as "<num>f" or "<num>b" (forward/backward from the referencing address) --
- * which `as' re-mangles to the identical symbol, so it round-trips. */
-static int islocal(char *name){ return (unsigned char)name[0]==1; }
-static char *locname(char *name, int suffix)
-{
-	static char b[16];
-	int n=0; char *p;
-	if(!islocal(name)) return name;
-	for(p=name+1; *p>='0' && *p<='9'; p++) n=n*10+(*p-'0');
-	if(suffix) sprintf(b,"%d%c",n,suffix); else sprintf(b,"%d",n);
-	return b;
+/* Authentic `as' keeps numeric local labels (`1:'/`1f'/`1b') out of the symbol
+ * table -- they resolve in-memory like 2BSD's curfb table.  So a reference whose
+ * target has no named symbol gets an objdump-style synthetic label `.L<addr>',
+ * emitted at the definition and used by every reference. */
+static int Bsz;				/* bss size (Tsize/Dsize already track text/data) */
+static int segof(int a){ a&=0xffff;
+	if(a<Tsize) return N_TEXT;
+	if(a<Tsize+Dsize) return N_DATA;
+	if(a<Tsize+Dsize+Bsz) return N_BSS;
+	return -1; }
+static int AuxSet[1024], NAuxSet;
+static void add_aux(int a){ int i; for(i=0;i<NAuxSet;i++) if(AuxSet[i]==a) return;
+	if(NAuxSet<1024) AuxSet[NAuxSet++]=a; }
+static int  in_aux(int a){ int i; for(i=0;i<NAuxSet;i++) if(AuxSet[i]==a) return 1; return 0; }
+static char *synthname(int a){ static char b[16]; sprintf(b,".L%o",a&0xffff); return b; }
+/* a named symbol `l', else a synthetic `.L<targ>' (recorded so its definition
+ * is emitted) when targ is in a segment; else null (caller prints a raw addr). */
+static char *orsynth(char *l, int targ){
+	if(l) return l;
+	if(segof(targ)>=0){ add_aux(targ); return synthname(targ); }
+	return 0;
 }
-static char *locref(char *name, int targ, int ref)	/* Nf / Nb */
-{ return name ? locname(name, (targ>ref)?'f':'b') : name; }
 
 static int Iaddr;	/* address of the instruction currently being decoded */
 
@@ -120,12 +126,12 @@ static int symword(long wo, int ref, char *out)
 	}
 	if(type==002 || type==004 || type==006){	/* RTEXT/RDATA/RBSS */
 		int seg = type==002?N_TEXT : type==004?N_DATA : N_BSS;
-		if((nm=nearestlabel(val,seg,&base))!=0){
-			nm=locref(nm, base, ref);
+		if((nm=nearestlabel(val,seg,&base))!=0){	/* named symbol + offset */
 			if(((val-base)&0xffff)) sprintf(out,"%s+%o",nm,(val-base)&0xffff);
 			else strcpy(out,nm);
 			return 1;
 		}
+		if((nm=orsynth(0,val))!=0){ strcpy(out,nm); return 1; }	/* synthesize .L<addr> */
 	}
 	return 0;
 }
@@ -140,7 +146,7 @@ static char *labelat(int addr, int seg)
 		if(Sym[i].value!=addr) continue;
 		if(best<0 || (ISEXT(Sym[i].type) && !ISEXT(Sym[best].type))) best=i;
 	}
-	return best<0 ? 0 : locref(Sym[best].name, addr, Iaddr);
+	return best<0 ? 0 : Sym[best].name;
 }
 
 /* ---- instruction decoder ------------------------------------------------
@@ -181,7 +187,6 @@ static int offref(int targ, long wo, char *out)
 	default:  return 0;
 	}
 	if((nm=nearestlabel(targ,seg,&base))==0) return 0;
-	nm=locref(nm, base, Iaddr);
 	if((targ-base)&0xffff) sprintf(out,"%s+%o",nm,(targ-base)&0xffff);
 	else strcpy(out,nm);
 	return 1;
@@ -207,6 +212,7 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 		if(reg==7){ wo=*po; x=w16(*po); *po+=2; *paddr+=2;	/* @#abs */
 			if(relexp(wo,x,"*$%s",out)) break;
 			l=labelat(x,N_TEXT); if(!l)l=labelat(x,N_DATA); if(!l)l=labelat(x,N_BSS);
+			l=orsynth(l,x);
 			if(l)sprintf(out,"*$%s",l); else sprintf(out,"*$%o",x); }
 		else sprintf(out,"*(%s)+",rn);
 		break;
@@ -219,7 +225,8 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 			targ=(*paddr + (short)x)&0xffff;
 			l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_BSS);
 			if(l)sprintf(out,"%s",l);
-			else if(offref(targ,wo,out)) ;		/* nearest+offset (0f+2) */
+			else if(offref(targ,wo,out)) ;		/* named symbol + offset */
+			else if((l=orsynth(0,targ))) sprintf(out,"%s",l);	/* .L<addr> */
 			else sprintf(out,"%o",targ); }
 		else sprintf(out,"%o(%s)",x&0177777,rn);
 		break;
@@ -232,6 +239,7 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 			l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_TEXT);
 			if(l)sprintf(out,"*%s",l);
 			else if(offref(targ,wo,o7)) sprintf(out,"*%s",o7);
+			else if((l=orsynth(0,targ))) sprintf(out,"*%s",l);
 			else sprintf(out,"*%o",targ); }
 		else sprintf(out,"*%o(%s)",x&0177777,rn);
 		break;
@@ -277,7 +285,7 @@ static int decode(long o, int addr, char *buf)
 	   ((instr&0177400)>=0100000 && (instr&0177400)<=0103400)){
 		int idx=((instr>>8)&07) | (((instr>>15)&1)<<3);
 		int off=(signed char)(instr&0377), targ=(addr+2+2*off)&0xffff;
-		char *l=labelat(targ,N_TEXT);
+		char *l=orsynth(labelat(targ,N_TEXT),targ);
 		if(l) sprintf(buf,"%s\t%s",brmne[idx],l);
 		else  sprintf(buf,"%s\t%o",brmne[idx],targ);
 		return 2;
@@ -334,7 +342,7 @@ static int decode(long o, int addr, char *buf)
 		case 0073000: fmtop(instr&077,&po,&adr,o1); sprintf(buf,"ashc\t%s,%s",o1,regname(reg)); return po-o;
 		case 0074000: fmtop(instr&077,&po,&adr,o1); sprintf(buf,"xor\t%s,%s",regname(reg),o1); return po-o;
 		case 0077000: { int off=instr&077, targ=(addr+2-2*off)&0xffff;
-				char *l=labelat(targ,N_TEXT);
+				char *l=orsynth(labelat(targ,N_TEXT),targ);
 				if(l)sprintf(buf,"sob\t%s,%s",regname(reg),l); else sprintf(buf,"sob\t%s,%o",regname(reg),targ);
 				return 2; }
 		}
@@ -380,7 +388,8 @@ static void labels(int addr, int seg, FILE *out)
 	int i;
 	for(i=0;i<NSym;i++)
 		if(Sym[i].value==addr && BASETYPE(Sym[i].type)==seg && Sym[i].name[0])
-			fprintf(out, "%s:\n", locname(Sym[i].name,0));
+			fprintf(out, "%s:\n", Sym[i].name);
+	if(in_aux(addr) && segof(addr)==seg) fprintf(out, "%s:\n", synthname(addr));	/* objdump-style .L<addr> */
 }
 
 /* disassemble the text in PDP-11 address range [a0,a1); tbase = file offset
@@ -478,9 +487,16 @@ static void do_object(long base, char *what, FILE *out)
 	int i;
 	readsyms(SYMOFF, syms);
 	/* relocation geometry: reltext follows data, reldata follows reltext */
-	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data;
+	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data; Bsz=bss; NAuxSet=0;
 	RTbase=DBASE+data; RDbase=DBASE+data+text; HasReloc=!flag;
 	banner(out, what, magic, text, data, bss);
+	if(Asm){	/* scan pass: resolve all references (to a null sink) so any
+			 * numeric locals that need a synthetic La<addr> label are known
+			 * before we emit their definitions */
+		FILE *sink=fopen("/dev/null","w");
+		NAuxSet=0;
+		if(sink){ disasm_text(TBASE,0,text,sink); if(data) disasm_data(DBASE,text,data,sink); fclose(sink); }
+	}
 	if(Asm){	/* declare globals + absolute (~name=offset) symbols so the
 			 * source reassembles to the same symbol table */
 		for(i=0;i<NSym;i++)
@@ -521,7 +537,7 @@ static void do_aout_split(char *stem, int tostdout)
 	long SYMOFF=DBASE+data+reloc;
 	int i, k, fn[512], nfn=0;
 	readsyms(SYMOFF, syms);
-	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data;
+	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data; Bsz=bss; NAuxSet=0;
 	RTbase=DBASE+data; RDbase=DBASE+data+text; HasReloc=!flag;
 	for(i=0;i<NSym;i++)
 		if(BASETYPE(Sym[i].type)==N_FN && nfn<512) fn[nfn++]=i;

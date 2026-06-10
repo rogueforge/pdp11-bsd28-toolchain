@@ -19,10 +19,12 @@ the relocation as well.  This
 requires reading the **relocation table** so each relocated operand comes back
 as a symbol (`jsr pc,*$_doprnt`, `mov $__iob+12,(sp)`) rather than a raw word.
 
-`as` mangles a numeric local label (`1:`) into a symbol-table entry named
-`\001<num>_<instance>`; das reconstructs it as `1:` for the definition and
-`1f`/`1b` for references (forward/backward), which `as` re-mangles to the same
-symbol -- so even hand-written assembly with numeric local labels round-trips.
+Authentic 2BSD `as` keeps numeric local labels (`1:`/`1f`/`1b`) out of the
+symbol table entirely -- they resolve in-memory (the `curfb` table) and are
+never written to the `.o` (our `as` matches this).  A branch/reference whose
+target therefore has no named symbol gets an **objdump-style synthetic label**
+`.L<addr>`, emitted at the definition and used by every reference -- so the
+disassembly stays readable and reassembles.
 The `sys' macro (`as''s name for the `trap' instruction) can carry inline
 argument words -- `sys 0; 9f' is the trap plus the address of `9:'.  das spots
 these because a relocated word where an opcode should be is inline data, not

@@ -516,7 +516,7 @@ void writeout()
 	/* assign symbol indices: globals + defined locals (skip undefined-but-unreferenced) */
 	int idx=0;
 	for(i=0;i<NHASH;i++) for(sp=htab[i];sp;sp=sp->next){
-		if((sp->flags&SF_GLOBL) || (sp->flags&SF_DEF) || sp->seg==SEXT){ sp->index=idx++; nsym++; }
+		if(((sp->flags&SF_GLOBL) || (sp->flags&SF_DEF) || sp->seg==SEXT) && sp->name[0]!=1){ sp->index=idx++; nsym++; }
 	}
 	ssize = nsym*12;
 	if(!(f=fopen(outfile,"w"))){ perror(outfile); exit(1); }
@@ -530,7 +530,9 @@ void writeout()
 	/* symbols: name[8], n_type, n_ovly, value */
 	for(i=0;i<NHASH;i++) for(sp=htab[i];sp;sp=sp->next){
 		int nt;
-		if(!((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT)) continue;
+		/* numeric local labels (\001N_M) resolve in-memory like 2BSD's
+		 * curfb table -- they are never written to the .o symbol table */
+		if(!((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT) || sp->name[0]==1) continue;
 		if(sp->flags&SF_DEF){ switch(sp->seg){case STEXT:nt=N_TEXT;break;case SDATA:nt=N_DATA;break;
 			case SBSS:nt=N_BSS;break;default:nt=N_ABS;} }
 		else nt=N_UNDF;
@@ -593,7 +595,7 @@ char**argv;
 	 * symbol table writeout() emits (same iteration order/predicate). */
 	{ int h; struct sym *sp; int idx=0;
 	  for(h=0;h<NHASH;h++) for(sp=htab[h];sp;sp=sp->next)
-		if((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT)
+		if(((sp->flags&SF_GLOBL)||(sp->flags&SF_DEF)||sp->seg==SEXT) && sp->name[0]!=1)
 			sp->index=idx++;
 	}
 	/* pass 2: emit */
