@@ -58,6 +58,15 @@ struct	nlist {	/* symbol table entry -- 12 bytes */
 	uint16_t	n_value;	/* value */
 };
 
+/*
+ * The 2.8BSD binutils (nm/size/strip), built with MENLO_OVLY, spell the type
+ * and overlay fields nn_type/nn_ovno.  The layout is identical to n_type/
+ * n_ovly, so alias them unconditionally -- nm.c includes a.out.h BEFORE
+ * whoami.h, so a MENLO_OVLY-gated alias would be evaluated too early.
+ */
+#define	nn_type	n_type
+#define	nn_ovno	n_ovly
+
 		/* values for type flag */
 #define	N_UNDF	0	/* undefined */
 #define	N_ABS	01	/* absolute */
