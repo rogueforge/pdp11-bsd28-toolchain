@@ -194,6 +194,7 @@ again:
 	if(c=='\\' && (ip[1]=='<'||ip[1]=='>')){	/* \< left shift, \> right shift */
 		int s=ip[1]; ip+=2; return tok=(s=='<')?TLSH:TRSH;
 	}
+	if(c=='\\' && ip[1]=='/'){ ip+=2; return tok='/'; }	/* \/ division ('/' is a comment) */
 	ip++;
 	return tok=c;
 }
