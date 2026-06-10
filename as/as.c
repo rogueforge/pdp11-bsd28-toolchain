@@ -502,6 +502,17 @@ void assemble()
 				struct sym*sp=find_sym(name);	/* must not create one (e.g. `..') */
 				if(sp && sp->kwtype){ ckw.name=sp->name; ckw.type=sp->kwtype; ckw.opcode=sp->value; kw=&ckw; }
 			}
+			/* a no-operand instruction (type 01) is just an opcode word; when one
+			 * is followed by a binary operator it is a bare expression, not the
+			 * instruction -- `sec|sev|sez|sen' ORs the four cc-set opcodes into a
+			 * single word (set C,V,Z,N).  Fall through to the expression path. */
+			if(kw && kw->type==01){ int p=peek();
+				if(p=='|'||p=='+'||p=='-'||p=='*'||p=='/'||p=='&'||p=='^'||p=='%'||p=='!'||p==TLSH||p==TRSH){
+					pushtok(TID, 0, name, kw);
+					{ int seg; long v=expr(&seg); doword(v,seg,exsym); }
+					continue;
+				}
+			}
 			if(kw){
 				switch(kw->type){
 				case 01:  /* absolute no-operand insn: setd/clc/sec/cfcc... */
