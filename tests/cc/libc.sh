@@ -61,6 +61,29 @@ check_eq "file I/O round-trip" "alpha
 beta 42
 lines=2" "`"$SIM" "$tmp/f" 2>/dev/null`"
 
+# --- malloc / free / realloc (authentic 2.8BSD free-list allocator) -------
+cat > "$tmp/m.c" <<'EOF'
+char *malloc(), *realloc();
+int main(){
+	char *a, *b; int i, bad;
+	a = malloc(100);
+	for (i = 0; i < 99; i++) a[i] = 'A' + (i % 26);
+	a[99] = 0;
+	b = malloc(50); strcpy(b, "block-b");
+	a = realloc(a, 300);          /* move + preserve across an intervening block */
+	bad = 0;
+	for (i = 0; i < 99; i++) if (a[i] != 'A' + (i % 26)) bad++;
+	printf("realloc preserved=%d b=[%s]\n", bad == 0, b);
+	free(a); free(b);
+	a = malloc(40); strcpy(a, "reused");   /* reuse freed space */
+	printf("reuse=[%s]\n", a);
+	return 0;
+}
+EOF
+( cd "$tmp" && "$BIN-cc" m.c -o m ) || fail "malloc: cc failed"
+check_eq "malloc/free/realloc" "realloc preserved=1 b=[block-b]
+reuse=[reused]" "`"$SIM" "$tmp/m" 2>/dev/null`"
+
 # --- getchar/putchar through a pipe ---------------------------------------
 cat > "$tmp/c.c" <<'EOF'
 int main(){ int c; while((c=getchar())>=0) putchar(c); return 0; }

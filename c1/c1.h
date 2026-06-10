@@ -9,6 +9,10 @@
 #define	LTYPE	long	/* change to int for no long consts */
 #define	NCPS	8
 #define	NULL	0
+/* Target (PDP-11) scalar sizes in bytes.  c1 runs on the LP64 HOST, where
+ * sizeof(int)==4, so target-size arithmetic must use these constants, never
+ * the host sizeof. */
+#define	SZINT	2
 
 /*
  *  Tree node for unary and binary.

@@ -877,6 +877,13 @@ struct table *table;
 			*treep = p = optim(p);
 		p1 = p->tr1;
 	}
+	/* The optim() calls above can REDUCE p to a leaf (e.g. NAME).  Its tr1
+	 * slot is then union-overlapped name/offset data, not a pointer, so the
+	 * operator logic below would deref garbage -- p1 came out as e.g. 0x3,
+	 * which the PDP-11 read harmlessly from low memory but segfaults the
+	 * host.  Re-check LEAF and bail, exactly as the entry test at top does. */
+	if (opdope[p->op]&LEAF)
+		return(0);
 	if (p1 && p1->op==NAME) switch(p->op) {	/* p1 (tr1) may be NULL; the
 				 * PDP-11 read address 0 (!=NAME) harmlessly here */
 		case ASLSH:

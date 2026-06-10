@@ -1136,13 +1136,13 @@ struct fasgn *atp;
 	register struct tnode *tp;
 	register nwords, i;
 
-	nwords = atp->mask/sizeof(int);
+	nwords = atp->mask/SZINT;
 	tp = atp->tr1;
 	if (tp->op != ASSIGN) {
 		if (tp->op==RFORCE) {	/* function return */
 			if (sfuncr.nloc==0) {
 				sfuncr.nloc = isn++;
-				printf(".bss\nL%d:.=.+%o\n.text\n", sfuncr.nloc, nwords*sizeof(int));
+				printf(".bss\nL%d:.=.+%o\n.text\n", sfuncr.nloc, nwords*SZINT);
 			}
 			atp->tr1 = tnode(ASSIGN, STRUCT, &sfuncr, tp->tr1);
 			strasg(atp);
@@ -1159,7 +1159,7 @@ struct fasgn *atp;
 	tp->tr2 = strfunc(tp->tr2);
 	if (nwords==1)
 		setype(tp, INT);
-	else if (nwords==sizeof(int))
+	else if (nwords==SZINT)
 		setype(tp, LONG);
 	else {
 		if (tp->tr1->op!=NAME && tp->tr1->op!=STAR

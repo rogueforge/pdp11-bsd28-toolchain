@@ -25,7 +25,7 @@ C library (compiled by our `cc`):
   `strncpy` `strncat` `index` `rindex`), numeric (`atoi` `atol` `abs`),
   char-class table (`ctype_`), `qsort`, and small utilities (`getenv`
   `mktemp` `perror` `errlst` `swab` `isatty` `isapipe` `stty`/`gtty` `sleep`
-  `malloc`).
+  the authentic free-list `malloc`/`free`/`realloc`).
 - `stdio/` — the full buffered-I/O layer: `printf`/`fprintf` (over the asm
   `_doprnt`), `fopen`/`freopen`/`fdopen`, `fgets`/`fputs`/`fgetc`/`getchar`/
   `putchar`/`puts`/`gets`, `ungetc`, `fseek`/`ftell`/`rew`, `setbuf`, the
@@ -43,20 +43,30 @@ C library (compiled by our `cc`):
 Floating-point printing (`%f`/`%e`/`%g`, `atof`, `ecvt`, `gcvt` — PDP-11
 floats aren't IEEE; `stdio/fltstub.s` stubs the format hooks), the varargs
 `sprintf`/`scanf` family, the passwd/group database, networking, and the
-overlay / non-FP / profiling build variants.  `malloc` is currently a minimal
-bump allocator rather than the authentic free-list version.
+overlay / non-FP / profiling build variants.
 
 ## Porting notes
 
 Importing the library exercised paths `cc` output never had, which surfaced
-two real compiler bugs (both fixed): the **`switch` table** packed wrong on
-the host (getblk pads to the node-union size, so `pswitch` read every case as
-0 — c1/c11.c), and **`long + char`** segfaulted c1 because the ITOL promotion
-node's unset `tr2` was dereferenced (a NULL the PDP-11 tolerated — c10.c).
+four real compiler bugs (all fixed):
+- the **`switch` table** packed wrong on the host (getblk pads to the
+  node-union size, so `pswitch` read every case as 0 — c1/c11.c);
+- **`long + char`** segfaulted c1 because the ITOL promotion node's unset
+  `tr2` was dereferenced (a NULL the PDP-11 tolerated — c10.c);
+- **`sreorder`** crashed when `optim()` reduced a node to a leaf and the
+  operator logic then read its union-overlapped `tr1` as a pointer — a
+  layout-dependent crash that only fired under cc's heap layout (c10.c);
+- **structure assignment emitted no copy** (`*q = *p`, `*t++ = *s++`):
+  `strasg` computed the word count as `mask / sizeof(int)`, but c1 runs on
+  the host where `sizeof(int)==4`, so a 2-byte struct gave `2/4 == 0` words
+  and the copy loop ran zero times.  Fixed with a target `SZINT` (=2)
+  constant (c1/c11.c) — this is what made the authentic free-list
+  `malloc`/`free`/`realloc` work (realloc copies blocks with `*t++ = *s++`).
+
 The hand-written assembly also needed `as` features `cc` never emits (see
 docs/as.md): multi-file input, numeric local labels, the `..` relocation
-base.  `apsim` grew `ioctl` (reports ENOTTY so `isatty()==0` and stdio
-block-buffers) and `unlink`.
+base.  `apsim` grew `break`/sbrk (so the heap can grow), `ioctl` (reports
+ENOTTY so `isatty()==0` and stdio block-buffers), and `unlink`.
 
 ## Build
 

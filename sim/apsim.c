@@ -101,6 +101,12 @@ static void do_syscall(int num, int argaddr)
 					 * stdio block-buffers and flushes at exit. */
 		r = -1;
 		break;
+	case 17:			/* break(a1=new break addr).  apsim's 64KB is
+					 * flat-mapped, so the heap memory already
+					 * exists; just succeed unless the new break
+					 * would run into the stack (R6). */
+		r = ((a1&0xffff) < (R[6]&0xffff)) ? 0 : -1;
+		break;
 	default:
 		fprintf(stderr, "apsim: unhandled sys %d\n", num);
 		halted=1; ecode=127; return;
