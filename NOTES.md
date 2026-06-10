@@ -88,15 +88,14 @@ are added for `c2`, `as`, `ld`, and `cc` as those land.
 
 ## Known limitations (porting, to revisit)
 
-- **c2 optimizer not yet reliable.** c2 builds, links, and runs, and one
-  real bug is fixed (the local `struct node data` in `movedat` was read
-  uninitialised — the PDP-11 stack happened to be zero there). But it still
-  over-optimizes the standard function prologue (the `jbr L1 … L1: sub sp …
-  jbr L2` stack-adjust idiom every function emits): the dead-code-after-jump
-  pass deletes reachable code. There is also a buffer-overflow corruption in
-  the register-tracking arrays on some inputs. Until these are fixed, **cc
-  does not invoke c2** (the default cpp→c0→c1 pipeline is correct); `-O` is
-  experimental. See docs/c2.md.
+- **c2 optimizer: done** (was "not yet reliable"). `cc -O` runs it and
+  produces correct, smaller code; covered by `tests/cc/optimizer.sh`. The
+  porting bugs were the usual host/LP64 classes: `copy()`'s K&R varargs
+  stack-walk (`(&ap)[1]`) → `<stdarg.h>`; `alloc()`'s `sbrk` node arena →
+  malloc chunks (sbrk corrupts the host heap c2's stdio uses); and the NUL
+  bytes c1 emits on the host — glibc's `printf("%c",0)` writes a NUL where
+  the PDP-11 `_doprnt` emitted nothing — which c2 now skips in `getlin`, as
+  `as` already did.  c2 is opt-in via `-O`.  See docs/c2.md.
 
 ## Known limitations (authentic 2.8BSD behaviour, preserved)
 

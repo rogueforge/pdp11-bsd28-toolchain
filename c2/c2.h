@@ -4,6 +4,10 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>		/* malloc/exit for the host build */
+
+/* Size of a node-arena chunk (was raw sbrk increments on the PDP-11). */
+#define	C2ARENA	(256*1024)
 
 #define	JBR	1
 #define	CBR	2
@@ -124,7 +128,7 @@ char	ccloc[20];
 
 struct optab *ophash[OPHS];
 struct	node *nonlab();
-char	*copy();
+char	*copy(int, ...);	/* variadic: needs a prototype on LP64 */
 char	*sbrk();
 char	*findcon();
 struct	node *insertl();

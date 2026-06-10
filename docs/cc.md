@@ -16,9 +16,8 @@ file.c …`.
   files, and relocatable pass resolution.
 - `-c`/`-o` (assemble/link) run as far as invoking `as`, which is not yet
   ported, so they stop with a clear "Can't find …-as".
-- **`-O` (c2) is intentionally only invoked on request and is
-  experimental** — c2's optimizer is not yet reliable (see
-  [c2.md](c2.md)). The default pipeline does not use c2.
+- **`-O` runs the c2 peephole optimizer** (see [c2.md](c2.md)); it is
+  opt-in. The default pipeline (no `-O`) does not run c2.
 
 ## Porting fixes
 

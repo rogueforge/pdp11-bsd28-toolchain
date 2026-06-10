@@ -5,6 +5,8 @@ static	char	sccsid[] = "@(#)c20.c	2.1";	/*	SCCS id keyword	*/
  */
 
 #include "c2.h"
+#include <stdarg.h>
+#include <stdlib.h>
 
 struct optab optab[] = {
 	"jbr",	JBR,
@@ -94,7 +96,13 @@ char **argv;
 			exit(1);
 		}
 	}
-	lasta = firstr = lastr = sbrk(2);
+	/* Node arena: a malloc chunk, not raw sbrk -- on the host sbrk collides
+	 * with the libc malloc that c2's own stdio uses and corrupts the heap.
+	 * alloc() grabs a fresh chunk when this one is exhausted (nodes point at
+	 * each other by absolute address, so chunks need not be contiguous). */
+	firstr = lasta = malloc(C2ARENA);
+	lastr = lasta + C2ARENA;
+	if (lasta == 0) { fprintf(stderr, "C2: no memory\n"); exit(1); }
 	maxiter = 0;
 	opsetup();
 	do {
@@ -222,7 +230,13 @@ getlin()
 			fprintf(stderr, "C2: Sorry, input line too long\n");
 			exit(1);
 		}
-		*lp++ = c;
+		/* Drop embedded NULs.  c1 runs on the host, where glibc's
+		 * printf("%c",0) writes a NUL byte; on the PDP-11 _doprnt's %c
+		 * skipped a zero, so c1 there emitted nothing (e.g. `mov%c' with a
+		 * word op -> "mov", not "mov\0").  `as' already skips these; do the
+		 * same here so the opcode/operand split isn't truncated. */
+		if (c)
+			*lp++ = c;
 	} while ((c = getchar()) != EOF);
 	*lp++ = 0;
 	return(END);
@@ -339,13 +353,25 @@ struct node *at;
 	nlit++;
 }
 
+/*
+ * copy(na, s1 [, s2]) -- concatenate na (1 or 2) strings into a freshly
+ * alloc'd buffer.  The 2BSD original read the second string with `(&ap)[1]',
+ * walking the stack past the first parameter -- valid on the PDP-11's
+ * stack-contiguous args but garbage on the x86-64 register ABI.  Fetch the
+ * args with <stdarg.h> instead; the logic is otherwise unchanged.
+ */
 char *
-copy(na, ap)
-char *ap;
+copy(int na, ...)
 {
 	register char *p, *np;
-	char *onp;
+	char *onp, *ap, *ap2;
 	register n;
+	va_list args;
+
+	va_start(args, na);
+	ap  = va_arg(args, char *);
+	ap2 = (na>1) ? va_arg(args, char *) : 0;
+	va_end(args);
 
 	p = ap;
 	n = 0;
@@ -355,7 +381,7 @@ char *ap;
 		n++;
 	while (*p++);
 	if (na>1) {
-		p = (&ap)[1];
+		p = ap2;
 		while (*p++)
 			n++;
 	}
@@ -364,7 +390,7 @@ char *ap;
 	while (*np++ = *p++)
 		;
 	if (na>1) {
-		p = (&ap)[1];
+		p = ap2;
 		np--;
 		while (*np++ = *p++);
 	}

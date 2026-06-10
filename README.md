@@ -107,8 +107,9 @@ pointer-in-`int` truncation). Each tool has a porting guide in
 
 The full pipeline works end to end: `cc hello.c -o hello` produces a runnable
 classic 2.8BSD `a.out`, verified by execution in `apsim`, including buffered
-`printf` (`%d %s %c %x %o`). `c2` (the peephole optimizer) builds but is not
-yet reliable, so it is off by default.
+`printf` (`%d %s %c %x %o`). The `c2` peephole optimizer works too — `cc -O`
+runs it and produces correct, smaller code (loops, recursion, calls, and the
+stdio path are covered by the test suite). It is opt-in via `-O`.
 
 ## License / provenance
 

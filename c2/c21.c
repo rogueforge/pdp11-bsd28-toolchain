@@ -399,11 +399,18 @@ register n;
 	n++;
 	n &= ~01;
 	if (lasta+n >= lastr) {
-		if (sbrk(2000) == (char *)-1) {
+		/* current chunk exhausted: grab a fresh malloc chunk (not sbrk,
+		 * which would corrupt the host heap that c2's stdio uses).  Nodes
+		 * point at each other by absolute address, so chunks need not be
+		 * contiguous.  A single request larger than a chunk can't be met --
+		 * but nodes/strings are tiny. */
+		char *nb = (n >= C2ARENA) ? (char *)0 : malloc(C2ARENA);
+		if (nb == 0) {
 			fprintf(stderr, "C Optimizer: out of space\n");
 			exit(1);
 		}
-		lastr += 2000;
+		lasta = nb;
+		lastr = nb + C2ARENA;
 	}
 	p = lasta;
 	lasta += n;
