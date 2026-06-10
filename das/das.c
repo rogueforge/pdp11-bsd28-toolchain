@@ -176,6 +176,8 @@ static char brmne[16][6] = {	/* 0000400..0003400 and 0100000..0103400 */
 static char sopmne[16][6] = {	/* single-operand 0005000..0006700 */
 	"clr","com","inc","dec","neg","adc","sbc","tst",
 	"ror","rol","asr","asl","mark","mfpi","mtpi","sxt" };
+static char sopmne_d[4][6] = {	/* g 12..15 with bit 15 set: I/D-space + PS forms */
+	"mtps","mfpd","mtpd","mfps" };	/* 0106400/0106500/0106600/0106700 */
 static char dopmne[8][5] = { "", "mov","cmp","bit","bic","bis","add","" };
 static char fpmne[8][6]  = { "","mulf","modf","addf","movf","subf","cmpf","" };
 
@@ -228,8 +230,11 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 		if(reg==7){ wo=*po; x=w16(*po); *po+=2; *paddr+=2;	/* @#abs */
 			if(relexp(wo,x,"*$%s",out)) break;
 			Optarg=x;
+			/* @#abs: use a named symbol if one sits exactly there, else a
+			 * literal absolute address (often a hardware/vector location) --
+			 * do NOT synthesize a .L label; the address need not be in this
+			 * object, and low addresses are not instruction boundaries. */
 			l=labelat(x,N_TEXT); if(!l)l=labelat(x,N_DATA); if(!l)l=labelat(x,N_BSS);
-			l=orsynth(l,x);
 			if(l)sprintf(out,"*$%s",l); else sprintf(out,"*$%o",x); }
 		else sprintf(out,"*(%s)+",rn);
 		break;
@@ -373,9 +378,11 @@ static int decode(long o, int addr, char *buf)
 	/* single-operand group 0005000..0006700 (+ byte 0105000..) */
 	if((instr&0077000)==0005000 || (instr&0077000)==0006000){
 		int g=((instr>>6)&077)-050;	/* opcode is bits 6-11 */
-		char mb[6]; strcpy(mb,sopmne[g]);
-		/* mark/mfpi/mtpi/sxt (06400..06700) are not byte-modified */
-		if(b && g<014) strcat(mb,"b");
+		char mb[6];
+		/* for clr..sxt (g 0..11) bit 15 is the byte variant; for mark/mfpi/
+		 * mtpi/sxt (g 12..15) bit 15 selects mtps/mfpd/mtpd/mfps instead */
+		if(g>=014 && b) strcpy(mb, sopmne_d[g-014]);
+		else { strcpy(mb,sopmne[g]); if(b && g<014) strcat(mb,"b"); }
 		fmtop(instr&077,&po,&adr,o1);
 		sprintf(buf,"%s\t%s",mb,o1);
 		return po-o;
