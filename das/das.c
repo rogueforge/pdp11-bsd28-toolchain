@@ -423,6 +423,14 @@ static void markcode(long tbase, int a1)
 	int *q, qn=0, qi=0, i, qmax;
 	char buf[120];
 	if(a1<=0 || !Mark || !Targ) return;
+	/* a text segment with relocation info but no relocations at all is constant
+	 * data, not code (real code relocates its branch/call/data references) --
+	 * e.g. the lexer's `.byte' char tables, whose only symbol labels the table.
+	 * Leave it entirely as data (emitting it as words is byte-identical). */
+	if(HasReloc){ int a, any=0;
+		for(a=0;a+1<a1;a+=2) if(relat(tbase+a)){ any=1; break; }
+		if(!any) return;
+	}
 	qmax=a1+NSym+64;
 	q=malloc(sizeof(int)*qmax);
 	for(i=0;i<NSym;i++)			/* seeds: defined text symbols (entries) */
