@@ -90,8 +90,13 @@ static char *synthname(int a){ static char b[16]; sprintf(b,".L%o",a&0xffff); re
  * is emitted) when targ is in a segment; else null (caller prints a raw addr). */
 static char *orsynth(char *l, int targ){
 	if(l) return l;
-	if(segof(targ)>=0){ add_aux(targ); return synthname(targ); }
-	return 0;
+	if(segof(targ)<0) return 0;
+	if(targ & 1){	/* odd byte address: anchor to the even word + 1 (labels sit
+			 * only at even boundaries; e.g. px patches a header byte) */
+		static char b[20];
+		add_aux(targ&~1); sprintf(b,"%s+1",synthname(targ&~1)); return b;
+	}
+	add_aux(targ); return synthname(targ);
 }
 
 static int Iaddr;	/* address of the instruction currently being decoded */
