@@ -25,7 +25,7 @@ C library (compiled by our `cc`):
   `strncpy` `strncat` `index` `rindex`), numeric (`atoi` `atol` `abs`),
   char-class table (`ctype_`), `qsort`, and small utilities (`getenv`
   `mktemp` `perror` `errlst` `swab` `isatty` `isapipe` `stty`/`gtty` `sleep`
-  the authentic free-list `malloc`/`free`/`realloc`).
+  the authentic free-list `malloc`/`free`/`realloc`/`calloc`).
 - `stdio/` — the full buffered-I/O layer: `printf`/`fprintf` (over the asm
   `_doprnt`), `fopen`/`freopen`/`fdopen`, `fgets`/`fputs`/`fgetc`/`getchar`/
   `putchar`/`puts`/`gets`, `ungetc`, `fseek`/`ftell`/`rew`, `setbuf`, `sprintf`, the

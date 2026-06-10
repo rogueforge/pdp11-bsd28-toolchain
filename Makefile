@@ -250,7 +250,7 @@ LSYS = libc/include/sys.s
 # gen/ C sources (string, memory, numeric, char-class, small utilities)
 LIBC_GENC = strcmp strlen strcpy strcat strncmp strncpy strncat index rindex \
 	    atoi atol abs ctype_ getenv mktemp perror errlst qsort swab isatty \
-	    isapipe stty sleep malloc
+	    isapipe stty sleep malloc calloc
 # stdio/ C sources (the full buffered-I/O layer minus float/varargs/db)
 LIBC_STDIOC = printf fprintf data strout flsbuf fputc fopen freopen fdopen \
 	      fgets fputs fgetc getchar putchar puts gets ungetc fseek ftell rew \

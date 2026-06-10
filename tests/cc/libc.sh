@@ -84,6 +84,15 @@ EOF
 check_eq "malloc/free/realloc" "realloc preserved=1 b=[block-b]
 reuse=[reused]" "`"$SIM" "$tmp/m" 2>/dev/null`"
 
+cat > "$tmp/ca.c" <<'EOF'
+char *calloc();
+int main(){ int *a, i, nz; a = (int *)calloc(20, sizeof(int));
+	nz = 0; for (i = 0; i < 20; i++) if (a[i] != 0) nz++;
+	printf("calloc nonzero=%d\n", nz); return 0; }
+EOF
+( cd "$tmp" && "$BIN-cc" ca.c -o ca ) || fail "calloc: cc failed"
+check_eq "calloc zeroes" "calloc nonzero=0" "`"$SIM" "$tmp/ca" 2>/dev/null`"
+
 # --- sprintf (varargs -> _doprnt into a string) ---------------------------
 cat > "$tmp/sp.c" <<'EOF'
 int main(){ char b[80]; sprintf(b, "%d/%s/%x/%o/%d", 42, "hi", 255, 64, -5);
