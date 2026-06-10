@@ -55,6 +55,7 @@ struct sym {
 	int seg;		/* SABS/STEXT/SDATA/SBSS, or SEXT if undefined */
 	int value;
 	int flags;
+	int kwtype;		/* instruction type carried via `^' (`stst = N^tst'), or 0 */
 	int index;		/* assigned at symbol-table output */
 	struct sym *next;
 };
@@ -63,6 +64,7 @@ struct sym {
 #define SF_REG  04		/* symbol aliased to a register (`lp = r5') */
 
 int termreg;			/* set by term/expr when the value is a bare register */
+struct op *termkw, *exprkw;	/* keyword of the last term / of a `^' right operand */
 
 #define NHASH 1023
 struct sym *htab[NHASH];
@@ -85,12 +87,22 @@ void aerror(s) char *s; {
 void *xalloc(n) { void *p = calloc(1,n); if(!p){fprintf(stderr,"as: no memory\n");exit(1);} return p; }
 
 unsigned nhash(b) char *b; { unsigned h=0; int i; for(i=0;i<NCPS;i++) h=h*33+(unsigned char)b[i]; return h%NHASH; }
-struct sym *lookup(name) char *name; {
+/* find an existing symbol, or NULL -- never creates one (the dispatch must not
+ * mint a spurious entry, e.g. for the `..' reloc-base placeholder) */
+struct sym *find_sym(char *name){
 	char nb[NCPS]; int i; struct sym *sp; unsigned h;
 	for(i=0;i<NCPS && name[i];i++) nb[i]=name[i];
 	for(;i<NCPS;i++) nb[i]=0;
 	h=nhash(nb);
 	for(sp=htab[h];sp;sp=sp->next) if(memcmp(sp->name,nb,NCPS)==0) return sp;
+	return 0;
+}
+struct sym *lookup(name) char *name; {
+	struct sym *sp=find_sym(name); char nb[NCPS]; int i; unsigned h;
+	if(sp) return sp;
+	for(i=0;i<NCPS && name[i];i++) nb[i]=name[i];
+	for(;i<NCPS;i++) nb[i]=0;
+	h=nhash(nb);
 	sp=(struct sym*)xalloc(sizeof *sp);
 	memcpy(sp->name,nb,NCPS); sp->seg=SEXT; sp->index=-1;
 	sp->next=htab[h]; htab[h]=sp;
@@ -206,7 +218,7 @@ struct sym *exsym;		/* set by term/expr when result is external */
 long expr();
 long term(segp) int *segp; {
 	int t=lex(); long v; struct sym *sp;
-	exsym=0; *segp=SABS; termreg=0;
+	exsym=0; *segp=SABS; termreg=0; termkw=0;
 	if(t=='-'){ v=term(segp); return -v; }
 	if(t=='+'){ return term(segp); }	/* unary plus (e.g. `+2(r0)') */
 	if(t=='~'){ v=term(segp); return ~v; }
@@ -215,6 +227,7 @@ long term(segp) int *segp; {
 	if(t=='['){ v=expr(segp); if(lex()!=']')aerror("missing ]"); return v; }	/* 2BSD as: [] grouping */
 	if(t==TNUM) return tokval;
 	if(t==TID){
+		termkw=tokkw;					/* remember a keyword for `^' type-carry */
 		if(strcmp(tokname,".")==0){ *segp=curseg+1; return dot[curseg]; }
 		if(strcmp(tokname,"..")==0){ *segp=SABS; return 0; }	/* reloc base placeholder */
 		/* register (024) and absolute (01) keywords carry their value */
@@ -227,12 +240,12 @@ long term(segp) int *segp; {
 }
 long expr(segp) int *segp; {
 	int seg,seg2; long v,v2; struct sym *es;
-	int reg;
+	int reg; struct op *reskw=0;
 	v=term(&seg); es=exsym; reg=termreg;	/* a bare register, until an operator applies */
 	for(;;){
 		int t=peek();
 		if(t=='+'||t=='-'||t=='*'||t=='/'||t=='&'||t=='|'||t=='%'||t=='^'||t=='!'||t==TLSH||t==TRSH){
-			lex(); v2=term(&seg2); reg=0;
+			lex(); v2=term(&seg2); reg=0; reskw=0;
 			switch(t){
 			/* the segment checks fire only in pass 2: a forward reference is an
 			 * undefined SEXT in pass 1 but may resolve to an absolute symbol
@@ -241,14 +254,19 @@ long expr(segp) int *segp; {
 			case '-': v-=v2; if(seg==seg2&&seg!=SEXT){seg=SABS;es=0;} else if(seg2!=SABS&&pass==2)aerror("bad -"); break;
 			case '*': v*=v2; break; case '/': if(v2)v/=v2; break;
 			case '%': if(v2)v%=v2; break;
-			case '&': v&=v2; break; case '|': v|=v2; break; case '^': v^=v2; break;
+			case '&': v&=v2; break; case '|': v|=v2; break;
+			/* ^ = "value of left, type of right": value is the left operand
+			 * (the keyword's value is 0, so XOR leaves it), and the right
+			 * operand's keyword is carried out as the result's type (custom
+			 * opcode: `stst = 170300^tst' makes stst a single-op instruction) */
+			case '^': v^=v2; reskw=termkw; break;
 			case '!': v+=~v2; break;			/* 2BSD as: a!b = a + ~b */
 			case TLSH: v<<=(v2&037); break;			/* \< left shift */
 			case TRSH: v=(unsigned long)v>>(v2&037); break;	/* \> right shift (logical) */
 			}
 		} else break;
 	}
-	*segp=seg; exsym=es; termreg=reg; return v;
+	*segp=seg; exsym=es; termreg=reg; exprkw=reskw; return v;
 }
 
 /* ---------------- emission ---------------- */
@@ -445,7 +463,7 @@ void assemble()
 		if(t==';') continue;
 		if(t==TSTR){ int i; for(i=0;i<tokslen;i++) emitbyte(tokstr[i]); continue; }  /* bare string = .ascii */
 		if(t==TID){
-			char name[64]; struct op*kw; int t2;
+			char name[64]; struct op*kw, ckw; int t2;
 			strcpy(name,tokname); kw=tokkw;
 			t2 = lex();		/* the token after the identifier */
 			/* label?  name:   */
@@ -468,10 +486,15 @@ void assemble()
 					while(dot[curseg] < v) emitbyte(0);
 					if(dot[curseg] > v) dot[curseg]=v;	/* backward (rare) */
 				} else { struct sym*sp=lookup(name); sp->flags|=SF_DEF; sp->seg=seg; sp->value=v;
-					if(termreg) sp->flags|=SF_REG; else sp->flags&=~SF_REG;	/* `lp = r5' */ }
+					if(termreg) sp->flags|=SF_REG; else sp->flags&=~SF_REG;	/* `lp = r5' */
+					sp->kwtype = exprkw ? exprkw->type : 0;	/* `stst = N^tst' */ }
 				continue;
 			}
 			unlex();		/* push t2 back: it starts the operands/expression */
+			if(!kw){		/* a symbol defined as a custom instruction (`stst = N^tst') */
+				struct sym*sp=find_sym(name);	/* must not create one (e.g. `..') */
+				if(sp && sp->kwtype){ ckw.name=sp->name; ckw.type=sp->kwtype; ckw.opcode=sp->value; kw=&ckw; }
+			}
 			if(kw){
 				switch(kw->type){
 				case 01:  /* absolute no-operand insn: setd/clc/sec/cfcc... */

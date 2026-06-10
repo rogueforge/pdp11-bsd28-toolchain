@@ -332,9 +332,13 @@ static int decode(long o, int addr, char *buf)
 	   ((instr&0177400)>=0100000 && (instr&0177400)<=0103400)){
 		int idx=((instr>>8)&07) | (((instr>>15)&1)<<3);
 		int off=(signed char)(instr&0377), targ=(addr+2+2*off)&0xffff;
-		char *l=orsynth(labelat(targ,N_TEXT),targ);
-		if(l) sprintf(buf,"%s\t%s",brmne[idx],l);
-		else  sprintf(buf,"%s\t%o",brmne[idx],targ);
+		if(targ==Tsize)		/* skip-to-end-of-function: target is the text/data
+					 * boundary (no instruction there, and a .L label would
+					 * land in .data).  Emit pc-relative instead. */
+			sprintf(buf,"%s\t.+%o",brmne[idx],(targ-addr)&0xffff);
+		else { char *l=orsynth(labelat(targ,N_TEXT),targ);
+			if(l) sprintf(buf,"%s\t%s",brmne[idx],l);
+			else  sprintf(buf,"%s\t%o",brmne[idx],targ); }
 		CFtype=(idx==1?CF_JUMP:CF_COND); CFtarg=targ;	/* idx 1 = unconditional br */
 		return 2;
 	}
