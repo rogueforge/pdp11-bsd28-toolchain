@@ -606,6 +606,11 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 		fprintf(out, "  %s\n", buf);
 		addr+=len;
 	}
+	/* a text symbol can mark the very end of .text (one past the last
+	 * instruction) -- e.g. a boot loader's `end' that a pointer references.
+	 * The loop stops before it, so emit it here (only at the real text end,
+	 * not at a per-object split boundary, to avoid a double definition). */
+	if(a1==Tsize) labels(a1, N_TEXT, out);
 }
 
 static int haslabel(int addr, int seg);
