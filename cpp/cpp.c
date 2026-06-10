@@ -5,6 +5,7 @@ static	char	sccsid[] = "@(#)cpp.c	2.2";	/*	SCCS id keyword	*/
 # include <stdio.h>
 # include <unistd.h>
 # include <string.h>
+# include <stdarg.h>
 
 /* C command
 /* written by John F. Reiser
@@ -147,6 +148,8 @@ STATIC	int	lineno[MAXINC];
 STATIC	char	*dirs[10];	/* -I and <> directories */
 char *strdex(), *copy(), *subst(), *trmdir();
 struct symtab *stsym();
+int pperror(char *s, ...);	/* prototyped: passed pointer args (filenames) */
+int yyerror(char *s, ...);
 STATIC	int	fin	= STDIN;
 STATIC	FILE	*fout	= 0;	/* set to stdout in main (not constant on modern libc) */
 STATIC	int	nd	= 1;
@@ -808,7 +811,10 @@ ppsym(s) char *s; {/* kluge */
 }
 
 /* VARARGS1 */
-pperror(s,x,y) char *s; {
+/* stdarg, not K&R varargs: an arg may be a pointer (`filname'), which the old
+ * implicit-int params truncated on LP64 -> fprintf %s read a bad pointer and
+ * crashed (e.g. on "Can't find include file %s") */
+vpperror(s, ap) char *s; va_list ap; {
 	if (fnames[ifno][0]) fprintf(stderr,
 # if gcos
 			"*%c*   \"%s\", line ", exfail >= 0 ? 'F' : 'W',
@@ -817,14 +823,14 @@ pperror(s,x,y) char *s; {
 # endif
 				 fnames[ifno]);
 	fprintf(stderr, "%d: ",lineno[ifno]);
-	fprintf(stderr, s, x, y);
+	vfprintf(stderr, s, ap);
 	fprintf(stderr,"\n");
 	++exfail;
 }
 
-yyerror(s,a,b) char *s; {
-	pperror(s,a,b);
-}
+pperror(char *s, ...) { va_list ap; va_start(ap,s); vpperror(s,ap); va_end(ap); }
+
+yyerror(char *s, ...) { va_list ap; va_start(ap,s); vpperror(s,ap); va_end(ap); }
 
 ppwarn(s,x) char *s; {
 	int fail = exfail;
