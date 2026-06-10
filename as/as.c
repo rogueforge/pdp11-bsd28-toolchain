@@ -539,9 +539,10 @@ void assemble()
 				case 05:  flop5(kw->opcode); break;   /* movfo freg,dst */
 				case 012: movfop(kw->opcode); break;  /* movf (ld/st) */
 				case 014: flop14(kw->opcode); break;  /* addf fsrc,freg */
-				case 07:  if(strcmp(name,"xor")==0){ /* xor: src,reg like jsr fields */
+				case 07:  if(strcmp(name,"xor")==0){ /* xor R,dst : R (1st operand) in
+						   * bits 6-8, dst (2nd, may have an index word) in bits 0-5 */
 						struct operand s,d; getop(&s); if(lex()!=',')aerror(",");
-						getop(&d); emitword(kw->opcode|((d.mode&07)<<6)|(s.mode&077),SABS,0,0); putop(&s);
+						getop(&d); emitword(kw->opcode|((s.mode&07)<<6)|(d.mode&077),SABS,0,0); putop(&d);
 					  } else jsrop(kw->opcode); break;
 				case 010: rtsop(kw->opcode); break;
 				case 011: sysop(kw->opcode); break;
