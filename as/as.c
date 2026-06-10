@@ -367,6 +367,10 @@ void movfop(base){ struct operand s,d;	/* movf: LDF mem,freg | STF freg,mem */
 	putop(&s); putop(&d); }
 void rtsop(base){ struct operand r; getop(&r); emitword(base|(r.mode&07),SABS,0,0); }
 void sysop(base){ int seg; long v=expr(&seg); emitword(base|(v&077),SABS,0,0); }
+/* emt [code] -- the operand is optional (bare `emt' == `emt 0'); 8-bit code */
+void emtop(base){ int seg, t=peek(); long v=0;
+	if(t!=TNL && t!=';' && t!=TEOF) v=expr(&seg);
+	emitword(base|(v&0377),SABS,0,0); }
 void branchop(base){ int seg; long v=expr(&seg); long off=(v-(dot[curseg]+2))/2;
 	if(pass==2 && (off<-128||off>127)) aerror("branch out of range");
 	emitword(base|(off&0377),SABS,0,0); }
@@ -448,6 +452,7 @@ void assemble()
 					  } else jsrop(kw->opcode); break;
 				case 010: rtsop(kw->opcode); break;
 				case 011: sysop(kw->opcode); break;
+				case 041: emtop(kw->opcode); break;
 				case 06:  branchop(kw->opcode); break;
 				case 030: eisop(kw->opcode); break;
 				case 031: sobop(kw->opcode); break;
