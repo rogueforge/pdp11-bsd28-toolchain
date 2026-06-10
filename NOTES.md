@@ -86,6 +86,43 @@ are added for `c2`, `as`, `ld`, and `cc` as those land.
 - `tests/fixtures/` — committed real 2.8BSD PDP-11 objects (e.g.
   `dkleave.o`) for the binutils tests.
 
+## Assembler ⇄ disassembler round-trip (corpus verification)
+
+A strong authenticity check beyond the regression suite: disassemble every `.s`
+in the 2.8BSD tree with `das -a` and reassemble it, requiring byte-identical
+text+data.  The **entire corpus round-trips — 197 of 197 files that assemble,
+zero differences** — so `das` is a verified byte-exact inverse of `as`, and `as`
+in turn reproduces every form the original tree uses (compiler output, all of
+libc, syscall stubs, boot loaders, the overlay runtime, the `px` Pascal
+interpreter, the kernel machine-config, and the assembler's own source).
+Reaching it drove two kinds of work:
+
+- **`as` authenticity (porting fixes only).**  Operators the manual documents
+  but the port lacked: `\<`/`\>` shifts, binary `!`, `[...]` grouping, `\/`
+  division (`/` starts a comment, so division is spelled `\/`), and the `^`
+  "value-of-left, type-of-right" operator, which defines custom opcodes
+  (`stst = 170300^tst`).  Character forms: the `'X` escapes and the `"xy`
+  double-character constant (`"` is *not* a string delimiter in 2BSD — strings
+  use `< >`).  Symbol/segment handling: register aliasing (`lp = r5` carries the
+  register *type*), forward references to absolute symbols (segment checks
+  deferred to pass 2), and a no-operand instruction before a binary operator
+  parsed as an expression (`sec|sev|sez|sen` sets all four condition codes in
+  one word).  Instructions the early (1972) manual predates but the tree uses:
+  `emt`, the no-operand control ops (`halt`/`wait`/`rti`/...), and the
+  `mfp*`/`mtp*` MMU set.
+
+- **`das` code/data recovery.**  A recursive-descent control-flow walk separates
+  code from data embedded in text; a *validated* gap recovery handles code
+  reached only through hardware vectors (a pc-relative relocation proves a gap
+  is code, then the decode must be self-consistent); a `sysent` mirror supplies
+  `sys` inline-argument counts; and bss/data are reconstructed at byte
+  granularity for odd-addressed `.byte` fields.  See `docs/das.md`.
+
+The 24 files that don't assemble standalone are **not** gaps: the `px` and
+assembler-source *fragments* (which share definitions and assemble as units),
+SCCS artifacts (`s.*`), non-PDP-11 assembly (troff macros, a `.vax.s`), and the
+c2 codegen template `table.s` (preprocessed into assembly, not plain `.s`).
+
 ## Known limitations (porting, to revisit)
 
 - **c2 optimizer: done** (was "not yet reliable"). `cc -O` runs it and
