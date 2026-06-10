@@ -36,4 +36,17 @@ grep -l '_helper:' p.*.dis >/dev/null 2>&1 || fail "a.out: _helper not in any sp
 test -f lib.a.m.o.dis || fail "archive: member m.o not disassembled"
 check_contains "archive member" "`cat lib.a.m.o.dis`" "_sq:"
 
+# --- 4. assembleable round-trip: das -a | as -> byte-identical text+data ---
+cat > rt.c <<'EOF'
+int g;
+int helper(n) int n; { if (n < 2) return 1; return n * helper(n - 1); }
+int main() { g = helper(5); return g; }
+EOF
+"$BIN-cc" -c rt.c || fail "cc -c rt.c failed"
+"$BIN-das" -a -p rt.o > rt.s 2>/dev/null
+"$BIN-as" -o rt2.o rt.s 2>/dev/null || fail "das -a output did not assemble"
+# compare text+data segments of the original and the reassembled object
+seg() { od -An -tx1 -j16 -N`expr \`od -An -tu2 -j2 -N4 "$1" | awk '{print $1+$2}'\`` "$1"; }
+[ "`seg rt.o`" = "`seg rt2.o`" ] || fail "round-trip text+data not byte-identical"
+
 exit 0

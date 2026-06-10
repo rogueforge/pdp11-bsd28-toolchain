@@ -31,12 +31,64 @@ static int w16(long off){	/* little-endian 16-bit word at byte offset */
 }
 
 /* ---- symbols ------------------------------------------------------------ */
-struct sym { char name[9]; int type; int value; };
+struct sym { char name[12]; int type; int value; };
 static struct sym *Sym;
 static int NSym;
 
 #define BASETYPE(t)	((t) & 037)		/* segment, masking the EXT bit */
 #define ISEXT(t)	((t) & 040)
+
+/* output mode + segment/relocation geometry (file offsets) of the current
+ * object, so the operand formatter can turn relocated words into symbols. */
+static int Asm;					/* -a: emit reassemblable source */
+static long Tbase, Dbase, RTbase, RDbase;	/* text/data + their reloc areas */
+static int Tsize, Dsize, HasReloc;
+
+/* on-disk relocation type field (matches as.c) */
+#define RABS 000
+#define REXT 010
+
+/* the relocation word for the operand/data word at file offset `wo' (0 none) */
+static int relat(long wo)
+{
+	if(!HasReloc) return 0;
+	if(wo>=Tbase && wo<Tbase+Tsize) return w16(RTbase + (wo-Tbase));
+	if(wo>=Dbase && wo<Dbase+Dsize) return w16(RDbase + (wo-Dbase));
+	return 0;
+}
+/* if the word at `wo' relocates against an EXTERNAL symbol, format it with
+ * `fmt' (one %s for the name) into `out' and return 1; else 0. */
+static int relexp(long wo, int addend, char *fmt, char *out)
+{
+	int rel=relat(wo);
+	if((rel&016)==REXT && (rel>>4)<NSym){
+		char s[48];
+		if(addend) sprintf(s, "%s+%o", Sym[rel>>4].name, addend&0177777);
+		else       strcpy(s, Sym[rel>>4].name);
+		sprintf(out, fmt, s);
+		return 1;
+	}
+	return 0;
+}
+
+/* `as' mangles a numeric local label (1:) into a symbol named "\001<num>_
+ * <instance>".  Reconstruct it: a definition prints as "<num>:", a reference
+ * as "<num>f" or "<num>b" (forward/backward from the referencing address) --
+ * which `as' re-mangles to the identical symbol, so it round-trips. */
+static int islocal(char *name){ return (unsigned char)name[0]==1; }
+static char *locname(char *name, int suffix)
+{
+	static char b[16];
+	int n=0; char *p;
+	if(!islocal(name)) return name;
+	for(p=name+1; *p>='0' && *p<='9'; p++) n=n*10+(*p-'0');
+	if(suffix) sprintf(b,"%d%c",n,suffix); else sprintf(b,"%d",n);
+	return b;
+}
+static char *locref(char *name, int targ, int ref)	/* Nf / Nb */
+{ return name ? locname(name, (targ>ref)?'f':'b') : name; }
+
+static int Iaddr;	/* address of the instruction currently being decoded */
 
 /* Best label for an address in a given segment (N_TEXT/N_DATA/N_BSS base).
  * Prefers an exact match, external over local; returns 0 if none. */
@@ -48,7 +100,7 @@ static char *labelat(int addr, int seg)
 		if(Sym[i].value!=addr) continue;
 		if(best<0 || (ISEXT(Sym[i].type) && !ISEXT(Sym[best].type))) best=i;
 	}
-	return best<0 ? 0 : Sym[best].name;
+	return best<0 ? 0 : locref(Sym[best].name, addr, Iaddr);
 }
 
 /* ---- instruction decoder ------------------------------------------------
@@ -83,33 +135,39 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 	char rb[4];
 	if(!rn){ sprintf(rb,"r%d",reg); rn=rb; }
 	switch(mode){
+	char *l; long wo;
 	case 0: strcpy(out,rn); break;
 	case 1: sprintf(out,"(%s)",rn); break;
 	case 2:
-		if(reg==7){ x=w16(*po); *po+=2; *paddr+=2; sprintf(out,"$%o",x); }
+		if(reg==7){ wo=*po; x=w16(*po); *po+=2; *paddr+=2;	/* $imm */
+			if(relexp(wo,x,"$%s",out)) break;
+			sprintf(out,"$%o",x); }
 		else sprintf(out,"(%s)+",rn);
 		break;
 	case 3:
-		if(reg==7){ x=w16(*po); *po+=2; *paddr+=2;	/* @#abs */
-			char *l=labelat(x,N_TEXT); if(!l)l=labelat(x,N_DATA);
-			if(!l)l=labelat(x,N_BSS);
+		if(reg==7){ wo=*po; x=w16(*po); *po+=2; *paddr+=2;	/* @#abs */
+			if(relexp(wo,x,"*$%s",out)) break;
+			l=labelat(x,N_TEXT); if(!l)l=labelat(x,N_DATA); if(!l)l=labelat(x,N_BSS);
 			if(l)sprintf(out,"*$%s",l); else sprintf(out,"*$%o",x); }
 		else sprintf(out,"*(%s)+",rn);
 		break;
 	case 4: sprintf(out,"-(%s)",rn); break;
 	case 5: sprintf(out,"*-(%s)",rn); break;
 	case 6:
-		x=w16(*po); *po+=2; *paddr+=2;
-		if(reg==7){ targ=(*paddr + (short)x)&0xffff;	/* PC-relative */
-			char *l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA);
-			if(!l)l=labelat(targ,N_BSS);
+		wo=*po; x=w16(*po); *po+=2; *paddr+=2;
+		if(reg==7){					/* PC-relative */
+			if(relexp(wo,(x+*paddr)&0xffff,"%s",out)) break;
+			targ=(*paddr + (short)x)&0xffff;
+			l=labelat(targ,N_TEXT); if(!l)l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_BSS);
 			if(l)sprintf(out,"%s",l); else sprintf(out,"%o",targ); }
 		else sprintf(out,"%o(%s)",x&0177777,rn);
 		break;
 	case 7:
-		x=w16(*po); *po+=2; *paddr+=2;
-		if(reg==7){ targ=(*paddr + (short)x)&0xffff;
-			char *l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_TEXT);
+		wo=*po; x=w16(*po); *po+=2; *paddr+=2;
+		if(reg==7){
+			if(relexp(wo,(x+*paddr)&0xffff,"*%s",out)) break;
+			targ=(*paddr + (short)x)&0xffff;
+			l=labelat(targ,N_DATA); if(!l)l=labelat(targ,N_TEXT);
 			if(l)sprintf(out,"*%s",l); else sprintf(out,"*%o",targ); }
 		else sprintf(out,"*%o(%s)",x&0177777,rn);
 		break;
@@ -119,6 +177,7 @@ static void fmtop(int spec, long *po, int *paddr, char *out)
 static int decode(long o, int addr, char *buf)
 {
 	int instr=w16(o), op, a1, a2;
+	Iaddr=addr;
 	long po=o+2;			/* offset just past the opcode word */
 	int adr=addr+2;			/* PC value while reading index words */
 	char o1[32], o2[32];
@@ -189,7 +248,7 @@ static int decode(long o, int addr, char *buf)
 			 else                          sprintf(buf,"%s\t%s,fr%d",m,o1,ac);
 			 return po-o; }
 		}
-		sprintf(buf,".word\t%o", instr); return 2;
+		sprintf(buf,"%o", instr); return 2;
 	}
 	/* double-operand: 1..6 word, 11..16 byte (16/116 == sub) */
 	if((op>=1&&op<=6)||(op>=011&&op<=016)){
@@ -227,7 +286,7 @@ static int decode(long o, int addr, char *buf)
 		return po-o;
 	}
 	(void)a1; (void)a2;
-	sprintf(buf,".word\t%o", instr);
+	sprintf(buf,"%o", instr);
 	return 2;
 }
 
@@ -251,13 +310,13 @@ static void readsyms(long symoff, int symsize)
 	}
 }
 
-/* emit every text label defined at `addr' */
+/* emit every label defined at `addr' in segment `seg' */
 static void labels(int addr, int seg, FILE *out)
 {
 	int i;
 	for(i=0;i<NSym;i++)
 		if(Sym[i].value==addr && BASETYPE(Sym[i].type)==seg && Sym[i].name[0])
-			fprintf(out, "%s%s:\n", ISEXT(Sym[i].type)?"":"L.", Sym[i].name);
+			fprintf(out, "%s:\n", locname(Sym[i].name,0));
 }
 
 /* disassemble the text in PDP-11 address range [a0,a1); tbase = file offset
@@ -270,6 +329,7 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 		int len, i;
 		labels(addr, N_TEXT, out);
 		len=decode(tbase+addr, addr, buf);
+		if(Asm){ fprintf(out, "\t%s\n", buf); addr+=len; continue; }
 		fprintf(out, "\t%06o:  ", addr);
 		for(i=0;i<len;i+=2) fprintf(out, "%06o ", w16(tbase+addr+i));
 		for(i=len;i<6;i+=2) fprintf(out, "       ");
@@ -283,26 +343,52 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 static void disasm_data(long dbase, int a0, int size, FILE *out)
 {
 	int addr=a0, end=a0+size;
+	char sym[40];
 	while(addr<end){
+		long wo=dbase+(addr-a0);
 		labels(addr, N_DATA, out);
-		fprintf(out, "\t%06o:  %06o\n", addr, w16(dbase+(addr-a0)));
+		if(Asm){
+			if(relexp(wo,w16(wo),"%s",sym)) fprintf(out, "\t%s\n", sym);
+			else fprintf(out, "\t%o\n", w16(wo));
+		} else
+			fprintf(out, "\t%06o:  %06o\n", addr, w16(wo));
 		addr+=2;
 	}
 }
 
+static int haslabel(int addr, int seg)
+{
+	int i;
+	for(i=0;i<NSym;i++)
+		if(Sym[i].value==addr && BASETYPE(Sym[i].type)==seg && Sym[i].name[0]) return 1;
+	return 0;
+}
+
+/* bss has no file content, so reserve space with `.=.+' -- but each label
+ * must sit at its own offset (a single trailing `.=.+size' would collapse
+ * them all to the start, shifting every bss address). */
 static void dump_bss(int a0, int size, FILE *out)
 {
 	int addr=a0, end=a0+size;
-	while(addr<end){ labels(addr, N_BSS, out); addr+=2; }
-	fprintf(out, "\t.=.+%o\n", size);
+	while(addr<end){
+		int next=addr+2;
+		labels(addr, N_BSS, out);
+		while(next<end && !haslabel(next,N_BSS)) next+=2;
+		fprintf(out, "\t.=.+%o\n", next-addr);
+		addr=next;
+	}
 }
 
 /* header banner */
 static void banner(FILE *out, char *what, int magic, int text, int data, int bss)
 {
-	fprintf(out, "; %s  --  PDP-11 2.8BSD disassembly (pdp11-bsd28-das)\n", what);
-	fprintf(out, "; magic 0%o  text %d  data %d  bss %d  (%d symbols)\n\n",
-		magic, text, data, bss, NSym);
+	int c = Asm ? '/' : ';';	/* `as' comments are `/', not `;' */
+	fprintf(out, "%c %s  --  pdp11-bsd28-das%s\n", c, what,
+		Asm ? " -a (reassemblable)" : " disassembly");
+	if(!Asm)
+		fprintf(out, "; magic 0%o  text %d  data %d  bss %d  (%d symbols)\n",
+			magic, text, data, bss, NSym);
+	fprintf(out, "\n");
 }
 
 /* Disassemble one self-contained object (exec header at file offset `base`)
@@ -314,8 +400,22 @@ static void do_object(long base, char *what, FILE *out)
 	long TBASE=base+16, DBASE=TBASE+text;
 	long reloc = flag ? 0 : (long)(text+data);
 	long SYMOFF = DBASE+data+reloc;
+	int i;
 	readsyms(SYMOFF, syms);
+	/* relocation geometry: reltext follows data, reldata follows reltext */
+	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data;
+	RTbase=DBASE+data; RDbase=DBASE+data+text; HasReloc=!flag;
 	banner(out, what, magic, text, data, bss);
+	if(Asm){	/* declare globals + absolute (~name=offset) symbols so the
+			 * source reassembles to the same symbol table */
+		for(i=0;i<NSym;i++)
+			if(ISEXT(Sym[i].type) && Sym[i].name[0])
+				fprintf(out, ".globl\t%s\n", Sym[i].name);
+		for(i=0;i<NSym;i++)
+			if(BASETYPE(Sym[i].type)==N_ABS && !ISEXT(Sym[i].type) && Sym[i].name[0])
+				fprintf(out, "%s = %o\n", Sym[i].name, Sym[i].value & 0177777);
+		fprintf(out, "\n");
+	}
 	fprintf(out, ".text\n");
 	disasm_text(TBASE, 0, text, out);
 	if(data){ fprintf(out, "\n.data\n"); disasm_data(DBASE, text, data, out); }
@@ -346,6 +446,8 @@ static void do_aout_split(char *stem, int tostdout)
 	long SYMOFF=DBASE+data+reloc;
 	int i, k, fn[512], nfn=0;
 	readsyms(SYMOFF, syms);
+	Tbase=TBASE; Tsize=text; Dbase=DBASE; Dsize=data;
+	RTbase=DBASE+data; RDbase=DBASE+data+text; HasReloc=!flag;
 	for(i=0;i<NSym;i++)
 		if(BASETYPE(Sym[i].type)==N_FN && nfn<512) fn[nfn++]=i;
 	/* sort the file boundaries by text address (insertion sort) */
@@ -407,10 +509,11 @@ int main(int argc, char **argv)
 
 	while(argc>1 && argv[1][0]=='-'){
 		if(!strcmp(argv[1],"-p")) tostdout=1;
-		else { fprintf(stderr,"usage: das [-p] file\n"); return 1; }
+		else if(!strcmp(argv[1],"-a")) Asm=1;	/* reassemblable source */
+		else { fprintf(stderr,"usage: das [-a] [-p] file\n"); return 1; }
 		argc--; argv++;
 	}
-	if(argc!=2){ fprintf(stderr,"usage: das [-p] file\n"); return 1; }
+	if(argc!=2){ fprintf(stderr,"usage: das [-a] [-p] file\n"); return 1; }
 	path=argv[1];
 	if((f=fopen(path,"rb"))==NULL){ perror(path); return 1; }
 	fseek(f,0,2); FLEN=ftell(f); fseek(f,0,0);

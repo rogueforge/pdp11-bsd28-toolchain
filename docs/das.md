@@ -6,7 +6,25 @@ three 2.8BSD PDP-11 binary formats.
 ```sh
 pdp11-bsd28-das  file        # write <stem>.<object>.dis listings (one per object)
 pdp11-bsd28-das -p file      # write a single combined listing to stdout
+pdp11-bsd28-das -a file      # emit reassemblable `as' source instead of a listing
 ```
+
+## Reassemblable output (`-a`)
+
+With `-a`, das emits clean `as` source (no address/byte columns, `/` comments,
+`.globl` declarations) that **reassembles to a byte-identical object**.  It is
+the true inverse of `as` for this toolchain: across the whole libc all 117
+objects round-trip with byte-identical text+data; 79 (including every
+compiler-generated object) are identical down to the relocation as well.  This
+requires reading the **relocation table** so each relocated operand comes back
+as a symbol (`jsr pc,*$_doprnt`, `mov $__iob+12,(sp)`) rather than a raw word.
+
+`as` mangles a numeric local label (`1:`) into a symbol-table entry named
+`\001<num>_<instance>`; das reconstructs it as `1:` for the definition and
+`1f`/`1b` for references (forward/backward), which `as` re-mangles to the same
+symbol -- so even hand-written assembly with numeric local labels round-trips.
+The residual reloc-only differences in the remaining stubs come from the `sys`
+macro's inline-argument convention, which the object file doesn't record.
 
 ## What it does
 
