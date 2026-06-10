@@ -115,6 +115,17 @@ char *locname(int dig, int n){ static char b[16]; sprintf(b,"\1%d_%d",dig,n); re
 
 int idchar(c){ return isalnum(c)||c=='_'||c=='.'||c=='~'; }
 
+/* 2BSD as character escapes (the `schar' table in as15.s): \n \s \t \e \0 \r
+ * \a \p; any other escaped char is taken literally (`\\' -> `\', etc.). */
+int escval(int c){
+	switch(c){
+	case 'n': return 012; case 's': return 040; case 't': return 011;
+	case 'e': return 004; case '0': return 000; case 'r': return 015;
+	case 'a': return 006; case 'p': return 033;
+	default:  return (unsigned char)c;
+	}
+}
+
 int lex()
 {
 	int c;
@@ -163,13 +174,15 @@ again:
 		if(*ip=='.') ip++;
 		tokval=v; return tok=TNUM;
 	}
-	if (c=='\'') { ip++; tokval=(unsigned char)*ip; if(*ip)ip++; return tok=TNUM; }
+	if (c=='\'') { ip++;			/* character constant 'X or '\X */
+		if(*ip=='\\'){ ip++; tokval=escval((unsigned char)*ip); }
+		else tokval=(unsigned char)*ip;
+		if(*ip)ip++; return tok=TNUM; }
 	if (c=='"'||c=='<') {
 		int term=(c=='"')?'"':'>'; ip++; tokslen=0;
 		while(*ip&&*ip!=term){
 			int ch=(unsigned char)*ip++;
-			if(ch=='\\'&&*ip){ switch(*ip++){case 'n':ch='\n';break;case 't':ch='\t';break;
-				case 'r':ch='\r';break;case '0':ch=0;break;case '\\':ch='\\';break;default:ch=ip[-1];}}
+			if(ch=='\\'&&*ip){ ch=escval((unsigned char)*ip); ip++; }
 			if(tokslen<1023)tokstr[tokslen++]=ch;
 		}
 		if(*ip)ip++;
