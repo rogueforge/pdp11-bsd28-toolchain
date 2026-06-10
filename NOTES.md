@@ -107,6 +107,40 @@ are added for `c2`, `as`, `ld`, and `cc` as those land.
   not the then-new `defined()` operator). Captured by
   `tests/cpp/defined_quirk.c`. Bug-compatible with stock 2.8BSD.
 
+## Text overlays (MENLO_OVLY) — defined, but not emitted
+
+2.8BSD adds **text overlays** (a Menlo Park / LBL / UCB feature; absent in V7) to
+break the PDP-11's 64 KB address space: code is split into segments swapped at
+run time. Two on-disk forms in `a.out.h`: manual/MENLO overlays (magic `0405`)
+and auto-overlays (`0430`/`0431`, with a `struct ovlhdr` prepended to `exec`).
+The manual scheme spans three tools — **ovld** (`ld.c -DMENLO_OVLY`, inserts a
+thunk for cross-overlay calls), **ovas** (forces `.globl` text refs undefined,
+type 42→40, so ovld resolves them), and a runtime manager (`libc/overlay`:
+ovcsv/ovcret track `__ovno`; a cross-overlay call traps via **`emt` 0104000** to
+the kernel, which swaps segmentation registers). Each symbol carries an
+`n_ovly` byte.
+
+**We build the non-overlay variants** — plain `ld`/`as`, `0407` output — so we
+never emit overlaid binaries. **But `MENLO_OVLY` IS defined** (via the authentic
+`cross/sys/localopts.h` → `cross/whoami.h`), and that is *required, not a bug*:
+
+- It is needed for **c0/c1 stack-frame consistency**, independent of overlays.
+  c0 emits `SETSTK = -maxauto+STAUTO`; only the MENLO formula `t = geti()` in c1
+  matches it. With `MENLO_OVLY` off, c1's `geti()-6` emits `sub $-6,sp`, walking
+  `sp` into the `csv`-saved registers — a callee passing an arg through `(sp)`
+  (e.g. `fclose`→`fflush`/`close`) then clobbers the caller's saved `r4`. See
+  the verbatim analysis in `cross/whoami.h`.
+- The overlay **code generation** it gates stays dormant: every overlay action
+  (`ovas`/`ovld`, `-V` to c1, `-DC_OVERLAY`, `-lovc`) is behind cc's `ovlyflag`,
+  which is set *only* by `cc -V` (`cc/cc.c`) and never passed. A normal
+  `cc hello.c` runs plain Pass 0/Pass 1 → plain `as`/`ld` → a `0407` binary.
+
+The `n_ovly` byte is still part of the on-disk **12-byte `nlist`** (`n_name[8]` +
+`n_type` + `n_ovly` + `n_value`), `0` in our objects — which is why `as`/`ld`/
+`nm`/`das` all read symbols as 12 bytes. Real overlay support would mean
+compiling `ovld`, porting `ovas`, and the `libc/overlay` runtime — only worth it
+for a target that overflows 64 KB.
+
 ## Build approach (mirrors VAX project)
 
 - Top-level Makefile using only BSD-make features (no GNU `%` rules,
