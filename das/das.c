@@ -608,6 +608,8 @@ static void disasm_text(long tbase, int a0, int a1, FILE *out)
 	}
 }
 
+static int haslabel(int addr, int seg);
+
 /* dump the data segment [a0,a0+size) as labelled words; dbase = file offset of
  * address a0. */
 static void disasm_data(long dbase, int a0, int size, FILE *out)
@@ -618,10 +620,20 @@ static void disasm_data(long dbase, int a0, int size, FILE *out)
 		long wo=dbase+(addr-a0);
 		labels(addr, N_DATA, out);
 		if(Asm){
+			/* a data symbol can sit at an odd address (a byte field in a struct,
+			 * e.g. as11.s's outfile/globfl); split the word into two .byte so the
+			 * label lands between them -- a word-granular dump would drop it and
+			 * shift every reference to it */
+			if(addr+1<end && haslabel(addr+1, N_DATA)){
+				int v=w16(wo);
+				fprintf(out, "\t.byte %o\n", v&0377);
+				labels(addr+1, N_DATA, out);
+				fprintf(out, "\t.byte %o\n", (v>>8)&0377);
+			}
 			/* Only EXTERNAL pointers are symbolized in data: an internal
 			 * pointer can target an odd byte offset (string tables), which
 			 * the word-granular dump cannot label, so keep its raw value. */
-			if(relexp(wo,w16(wo),"%s",sym)) fprintf(out, "\t%s\n", sym);
+			else if(relexp(wo,w16(wo),"%s",sym)) fprintf(out, "\t%s\n", sym);
 			else fprintf(out, "\t%o\n", w16(wo));
 		} else
 			fprintf(out, "\t%06o:  %06o\n", addr, w16(wo));
