@@ -15,6 +15,7 @@ source.c ─cpp─▶ ─c0─▶ ─c1─▶ [c2] ─as─▶ file.o ─ld─�
 | Guide | Tool(s) | Role | Status |
 |-------|---------|------|--------|
 | [cross-headers.md](cross-headers.md) | `cross/` a.out.h, ar.h | fixed-width on-disk structs for LP64 hosts | done |
+| [das.md](das.md) | `das` | disassembler (a.out/.o/.a; splits objects, labels via symbols) | done |
 | [binutils.md](binutils.md) | `nm`, `size`, `strip` | inspect/modify a.out | done |
 | [cpp.md](cpp.md) | `cpp` + `libucbpath` | C preprocessor | done |
 | [c0.md](c0.md) | `c0` | compiler pass 1 (parser) | done |

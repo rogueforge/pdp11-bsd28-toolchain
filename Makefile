@@ -60,6 +60,7 @@ binutils:
 	${HOSTCC} ${O} ${COMPAT} -Icross -o ${BIN}/${PREFIX}-nm    nm/nm.c
 	${HOSTCC} ${O} ${COMPAT} -Icross -o ${BIN}/${PREFIX}-size  size/size.c
 	${HOSTCC} ${O} ${COMPAT} -Icross -o ${BIN}/${PREFIX}-strip strip/strip.c
+	${HOSTCC} ${O} ${COMPAT} -Icross -o ${BIN}/${PREFIX}-das   das/das.c
 
 # ---------------------------------------------------------------------
 # libucbpath -- UCB library/include path search (openl, openlp) used by

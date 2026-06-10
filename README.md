@@ -18,7 +18,7 @@ output can be executed and verified on the host.
 
 ```sh
 make            # build the whole toolchain into ./usr/bin/
-make test       # build, then run the regression suite (16 tests)
+make test       # build, then run the regression suite (25 tests)
 
 # compile a C program to a PDP-11 a.out and run it in the simulator
 echo 'int main(){ printf("hello, pdp-11!\n"); return 0; }' > hi.c
@@ -50,13 +50,14 @@ All tools are installed to `${DESTDIR}/usr/bin/` with a `pdp11-bsd28-` prefix:
 | `pdp11-bsd28-ld`   | link editor |
 | `pdp11-bsd28-ar` / `-ranlib` | archiver and `__.SYMDEF` table of contents |
 | `pdp11-bsd28-nm` / `-size` / `-strip` | a.out inspection tools |
+| `pdp11-bsd28-das` | disassembler (a.out/.o/.a → labelled listings, splits objects) |
 | `pdp11-bsd28-apsim` | host-side user-mode PDP-11 simulator (runs the output) |
 
 Plus the runtime in `${DESTDIR}/usr/lib/`: `crt0.o` and `libc.a` (a
-substantial slice of the authentic 2.8BSD libc — 107 members: startup and
+substantial slice of the authentic 2.8BSD libc — 117 members: startup and
 long-arithmetic helpers, the string/memory/numeric `gen/` routines, `qsort`,
-buffered `stdio` including file I/O (`fopen`/`fgets`/`fputs`/`fseek`/…), and
-~40 syscall stubs).  See [docs/libc.md](docs/libc.md).
+buffered `stdio` (printf/scanf incl. `%f`, file I/O), the free-list malloc,
+floating-point support, and ~40 syscall stubs).  See [docs/libc.md](docs/libc.md).
 
 ## Using the toolchain
 
@@ -85,7 +86,7 @@ in): old-style function definitions, implicit `int`, etc.
 cc/  cpp/  c0/  c1/  c2/      compiler driver + passes
 as/                           assembler (C reimplementation)
 ld/  ar/  ranlib/             link editor, archiver, ranlib
-nm/  size/  strip/            binutils
+nm/  size/  strip/  das/      binutils (das = disassembler)
 libc/                         crt0, csv, syscall stubs, stdio, malloc
 cross/                        host build headers (a.out.h, ar.h, whoami.h, ...)
 include/                      target system headers (installed to usr/include)
