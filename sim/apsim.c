@@ -167,7 +167,15 @@ static void step(void)
 			FV=(((dv^sv)&(~sv^r))>>15)&1; return;
 		}
 		switch(bop){
-		case 1: putv(d,sv,byte); setNZ(sv,byte); FV=0; break;	/* MOV */
+		case 1:							/* MOV/MOVB */
+			/* MOVB to a register is the one byte instruction that
+			 * sign-extends the byte into the high half of the register
+			 * (all others leave the high byte alone).  Without this, a
+			 * `movb' of e.g. a NUL leaves stale high bits, so the format
+			 * loop's `beq' on a NUL never fires (printf %d hung). */
+			if(byte && (d&ISREG)) R[d&7]=sgn(sv,1)&0xffff;
+			else putv(d,sv,byte);
+			setNZ(sv,byte); FV=0; break;
 		case 2: dv=getv(d,byte); r=(sv-dv);			/* CMP */
 			setNZ(r,byte); { int m=byte?0xff:0xffff,sb=byte?0x80:0x8000;
 			FC=((sv&m)<(dv&m)); FV=(((sv^dv)&(~dv^r))&sb)!=0; } break;

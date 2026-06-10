@@ -237,12 +237,12 @@ ${BIN}/${PREFIX}-cc: cc/cc.c
 # ordering requirement.
 # ---------------------------------------------------------------------
 ASM  = ${BIN}/${PREFIX}-as
+CC   = ${BIN}/${PREFIX}-cc
 LSYS = libc/include/sys.s
 
-libc: as-tool ar-tool ranlib-tool dirs
+libc: as-tool ar-tool ranlib-tool cc-tool headers dirs
 	${ASM} -o ${LIB}/crt0.o ${LSYS} libc/csu/crt0.s
 	${ASM} -o libc/csv.o      libc/crt/csv.s
-	${ASM} -o libc/cleanup.o  libc/gen/cleanup.s
 	${ASM} -o libc/cerror.o   ${LSYS} libc/crt/cerror.s
 	${ASM} -o libc/cuexit.o   ${LSYS} libc/gen/cuexit.s
 	${ASM} -o libc/write.o    ${LSYS} libc/sys/write.s
@@ -255,12 +255,23 @@ libc: as-tool ar-tool ranlib-tool dirs
 	${ASM} -o libc/sbrk.o     ${LSYS} libc/sys/sbrk.s
 	${ASM} -o libc/unlink.o   ${LSYS} libc/sys/unlink.s
 	${ASM} -o libc/fstat.o    ${LSYS} libc/sys/fstat.s
+	# buffered stdio: authentic 2.8BSD printf/_doprnt/strout/flsbuf/data,
+	# the float-print stubs, and a minimal malloc.  flsbuf.o supplies the
+	# real _cleanup (flushes at exit), replacing the old no-op stub.
+	# (cc refuses `-o foo.o', so compile in-place via a subshell.)
+	cd libc/stdio && ${CURDIR}/${CC} -c printf.c fprintf.c data.c strout.c flsbuf.c fputc.c
+	cd libc/gen   && ${CURDIR}/${CC} -c malloc.c
+	${ASM} -o libc/stdio/doprnt.o    libc/stdio/doprnt.s
+	${ASM} -o libc/stdio/fltstub.o   libc/stdio/fltstub.s
 	rm -f ${LIB}/libc.a
 	${BIN}/${PREFIX}-ar rc ${LIB}/libc.a \
 		libc/cuexit.o libc/write.o libc/read.o libc/open.o \
 		libc/close.o libc/creat.o libc/lseek.o libc/exit.o \
 		libc/sbrk.o libc/unlink.o libc/fstat.o libc/csv.o \
-		libc/cleanup.o libc/cerror.o
+		libc/cerror.o \
+		libc/stdio/printf.o libc/stdio/fprintf.o libc/stdio/data.o \
+		libc/stdio/strout.o libc/stdio/flsbuf.o libc/stdio/fputc.o \
+		libc/stdio/doprnt.o libc/stdio/fltstub.o libc/gen/malloc.o
 	${BIN}/${PREFIX}-ranlib ${LIB}/libc.a
 
 # ---------------------------------------------------------------------
