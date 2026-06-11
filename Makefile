@@ -156,10 +156,10 @@ c1/cvopt: c1/cvopt.c; ${HOSTCC} ${O} ${COMPAT} -o $@ c1/cvopt.c
 c1/mktab: c1/mktab.c; ${HOSTCC} ${O} -o $@ c1/mktab.c
 
 # ---------------------------------------------------------------------
-# c2 -- peephole optimizer (operates on c1's assembly).  Builds and runs,
-# but its optimizer is NOT yet reliable: it over-optimizes the standard
-# function prologue (see docs/c2.md / NOTES.md).  cc does NOT invoke it by
-# default; -O is experimental.
+# c2 -- peephole optimizer (operates on c1's assembly).  `cc -O' runs it and
+# the libc is built with -O (above), matching 2.8's `compall'.  Verified
+# byte-identical to the linked rogue3.4 binary across the C library (strlen,
+# fread/fwrite, strcmp, ... -- 33 objects to the byte).  See docs/c2.md.
 # ---------------------------------------------------------------------
 
 C2FLAGS = ${O} ${COMPAT} -Ic2
@@ -276,9 +276,11 @@ LIBC_OBJS = $(addprefix libc/gen/,$(addsuffix .o,${LIBC_GENC})) \
 
 libc: as-tool ar-tool ranlib-tool cc-tool headers dirs
 	${ASM} -o ${LIB}/crt0.o ${LSYS} libc/csu/crt0.s
-	# C sources (cc refuses `-o foo.o', so compile in-place via a subshell)
-	cd libc/gen   && ${CURDIR}/${CC} -c $(addsuffix .c,${LIBC_GENC})
-	cd libc/stdio && ${CURDIR}/${CC} -c $(addsuffix .c,${LIBC_STDIOC})
+	# C sources (cc refuses `-o foo.o', so compile in-place via a subshell).
+	# -O runs c2, as the authentic 2.8 libc `compall' does (`cc -c -O' on every
+	# file); this is what makes the library byte-identical to 2.8's.
+	cd libc/gen   && ${CURDIR}/${CC} -O -c $(addsuffix .c,${LIBC_GENC})
+	cd libc/stdio && ${CURDIR}/${CC} -O -c $(addsuffix .c,${LIBC_STDIOC})
 	# hand-written asm in gen/ and stdio/ (cuexit does `sys exit')
 	${ASM} -o libc/gen/cuexit.o   ${LSYS} libc/gen/cuexit.s
 	${ASM} -o libc/gen/setjmp.o            libc/gen/setjmp.s
