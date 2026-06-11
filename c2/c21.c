@@ -495,12 +495,16 @@ struct node *ap;
 	p = ap;
 	p1 = p->code;
 	p2 = regs[RT1];
-	while (*p1 && *p1!=',')
+	/* A JBR/JMP/JSW to a numeric label carries its target in labno, leaving
+	 * code==0 (c20.c).  The PDP-11 read address 0 as an empty string -- no
+	 * operand, ilen 2 -- but *0 faults on the host, so guard it, exactly as
+	 * the output path already guards with `if (t->code)'. */
+	while (p1 && *p1 && *p1!=',')
 		*p2++ = *p1++;
 	*p2++ = 0;
 	p2 = regs[RT2];
 	*p2 = 0;
-	if (*p1++ !=',')
+	if (!p1 || *p1++ !=',')
 		return;
 	while (*p2++ = *p1++);
 }
