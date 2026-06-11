@@ -24,6 +24,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <sys/stat.h>		/* mkdir for the per-object output directory */
 
 #ifndef PREFIX
 #define PREFIX "pdp11-bsd28"
@@ -85,6 +86,8 @@ static int soff(int v){ v&=0xffff; return v>=0x8000 ? v-0x10000 : v; }
  *   0xADDR|0ADDR  name         (plain) */
 struct mapent { int addr; char name[80]; };
 static struct mapent Map[16000]; static int NMap;
+struct objent { char file[128]; int addr; };	/* object layout; see objfile() */
+static struct objent Obj[3000]; static int NObj;
 
 static void add_map(int addr, const char *name)
 {
@@ -97,6 +100,12 @@ static void load_map(const char *path)
 	if(!f){ fprintf(stderr,"dcc: cannot open map %s\n",path); return; }
 	while(fgets(buf,sizeof buf,f)){
 		if(buf[0]=='#'||buf[0]==';'||buf[0]=='\n') continue;
+		/* object boundary: obj <file> <addr> */
+		if(sscanf(buf,"%15s %79s %31s",a0,nm,ad)==3 && !strcmp(a0,"obj")){
+			if(NObj<3000){ strncpy(Obj[NObj].file,nm,127); Obj[NObj].file[127]=0;
+				       Obj[NObj].addr=(int)strtol(ad,0,0); NObj++; }
+			continue;
+		}
 		if(sscanf(buf,"%15s %79s %31s %31s",a0,nm,sz,ad)==4 && !strcmp(a0,"f"))
 			add_map((int)strtol(ad,0,0),nm);		/* r2: f name size addr */
 		else if(sscanf(buf,"%31s %79s",ad,nm)==2)
@@ -109,6 +118,39 @@ static const char *mapname(int addr)
 {
 	int i; for(i=0;i<NMap;i++) if(Map[i].addr==addr) return Map[i].name;
 	return 0;
+}
+
+/* Object boundaries: ld lays input objects out contiguously, so each occupies a
+ * text address range [start, next_start).  The stripped binary doesn't record
+ * them, so the map supplies them: `obj <file> <0xaddr>' marks where each object
+ * begins.  A function at address A belongs to the object with the greatest
+ * start <= A.  With no `obj' lines, output is a single .c.  (Obj[] declared above.) */
+static const char *objfile(int addr)
+{
+	int i, best=-1;
+	for(i=0;i<NObj;i++) if(Obj[i].addr<=addr && (best<0||Obj[i].addr>Obj[best].addr)) best=i;
+	return best>=0 ? Obj[best].file : "_unknown.c";
+}
+
+/* Output routing.  With `obj' boundaries we split into <stem>.dec/<file>.c, one
+ * per object (cached, opened on first use); otherwise everything goes to the one
+ * Single file.  stream_for(addr) returns the right stream for a function at addr. */
+static char Outdir[1024];
+static FILE *Single;
+static struct { char file[160]; FILE *fp; } Strm[4000]; static int NStrm;
+
+static FILE *stream_for(int addr)
+{
+	int i; char path[1300]; const char *file;
+	if(!Outdir[0]) return Single;			/* single-file mode */
+	file = objfile(addr);
+	for(i=0;i<NStrm;i++) if(!strcmp(Strm[i].file,file)) return Strm[i].fp;
+	snprintf(path,sizeof path,"%s/%s",Outdir,file);
+	{ FILE *fp=fopen(path,"w");
+	  if(!fp){ perror(path); return Single?Single:stdout; }
+	  if(NStrm<4000){ strncpy(Strm[NStrm].file,file,159); Strm[NStrm].fp=fp; NStrm++; }
+	  fprintf(fp,"/* %s -- one object of the input, decompiled by %s-dcc */\n\n",file,PREFIX);
+	  return fp; }
 }
 /* render a code/data target token (.L<oct>, *$<oct>, *$_name, _name) as a C
  * identifier, applying the map; `pfx' (fn_/g_) names an unmapped synthetic */
@@ -190,9 +232,10 @@ static char *labelof(char *line)
 /* Is line `i' a function entry?  A label whose first real instruction is the
  * csv prologue.  Sets `name': the symbol (stripped of `_'), or fn_<addr> for a
  * synthetic `.L<addr>' label das emits when there are no symbols. */
-static int func_entry_name(int i, char *name)
+static int func_entry_name(int i, char *name, int *addr)
 {
 	char lab[128], t[80], *l=labelof(Line[i]); int k;
+	if(addr) *addr=-1;
 	if(!l) return 0;
 	strncpy(lab,l,127); lab[127]=0;
 	for(k=i+1; k<NLine && k<i+6; k++){
@@ -200,6 +243,7 @@ static int func_entry_name(int i, char *name)
 		if(labelof(Line[k])||p[0]=='.'||p[0]==0||p[0]=='~') continue;  /* labels/aliases */
 		if(op_of(Line[k],"jsr",1,t) && !strcmp(t,Csv)){
 			strcpy(name, symname(lab,"fn_"));	/* map -> real name, else fn_<addr> */
+			if(addr && lab[0]=='.'&&lab[1]=='L') *addr=(int)strtol(lab+2,0,8);
 			return 1;
 		}
 		return 0;	/* first instruction is not the prologue */
@@ -379,7 +423,7 @@ static void emit_insn(FILE *out, struct insn *ins)
 }
 
 /* decompile the whole module to `out' */
-static void decompile(FILE *out)
+static void decompile(const char *outname)
 {
 	int i;
 
@@ -394,26 +438,36 @@ static void decompile(FILE *out)
 		add_fsym(nm,soff(off));
 	}
 
-	fprintf(out,"/* Decompiled by %s-dcc from %s-cc output (c0/c1).\n",PREFIX,PREFIX);
-	fprintf(out," * Best-effort reconstruction: K&R names recovered from the frame\n");
-	fprintf(out," * map; control flow shown with goto; verify against the .s. */\n\n");
+	/* output: a directory of per-object files if the map supplied `obj'
+	 * boundaries, else a single .c carrying everything */
+	if(NObj>0){
+		char *dot; strncpy(Outdir,outname,1000); Outdir[1000]=0;
+		dot=strrchr(Outdir,'.'); if(dot)*dot=0; strcat(Outdir,".dec");
+		mkdir(Outdir,0777);
+		fprintf(stderr,"dcc: %d object boundaries -> %s/\n",NObj,Outdir);
+	} else {
+		Single=fopen(outname,"w"); if(!Single){ perror(outname); return; }
+		fprintf(Single,"/* Decompiled by %s-dcc from %s-cc output (c0/c1).\n",PREFIX,PREFIX);
+		fprintf(Single," * Best-effort reconstruction: K&R names recovered from the frame\n");
+		fprintf(Single," * map; control flow shown with goto; verify against the .s. */\n\n");
+	}
 
 	/* pass 2: text -> one C function per global `_name:' ; data -> globals */
 	{
 		int inseg=0;	/* 0=none 1=text 2=data */
 		for(i=0;i<NLine;i++){
-			char *p=skipws(Line[i]), *lab, fnbuf[128];
+			char *p=skipws(Line[i]), *lab, fnbuf[128]; int faddr;
 			if(!strncmp(p,".text",5)){ inseg=1; continue; }
 			if(!strncmp(p,".data",5)||!strncmp(p,".bss",4)){ inseg=2; continue; }
 
-			if(inseg==1 && func_entry_name(i,fnbuf)){
-				int end, maxp=0, j; char tt[128];
+			if(inseg==1 && func_entry_name(i,fnbuf,&faddr)){
+				int end, maxp=0, j; char tt[128]; FILE *fo=stream_for(faddr);
 				/* the body runs to the next function entry or a segment change;
 				 * scan it for the frame parameters actually referenced (4,6,...) */
 				for(end=i+1; end<NLine; end++){
 					char *e=skipws(Line[end]), *q=Line[end];
 					if(!strncmp(e,".data",5)||!strncmp(e,".bss",4)||!strncmp(e,".text",5)) break;
-					if(func_entry_name(end,tt)) break;
+					if(func_entry_name(end,tt,0)) break;
 					while((q=strstr(q,"(r5)"))){
 						char *s=q; int off;
 						while(s>Line[end] && isdigit((unsigned char)s[-1])) s--;
@@ -423,37 +477,39 @@ static void decompile(FILE *out)
 					}
 				}
 				/* signature + K&R parameter declarations */
-				fprintf(out,"%s(",fnbuf);
-				for(j=4;j<=maxp;j+=2) fprintf(out,"%s%s",vname(j),j+2<=maxp?", ":"");
-				fprintf(out,")\n");
-				for(j=4;j<=maxp;j+=2) fprintf(out,"\tint %s;\n",vname(j));
-				fprintf(out,"{\n");
+				fprintf(fo,"%s(",fnbuf);
+				for(j=4;j<=maxp;j+=2) fprintf(fo,"%s%s",vname(j),j+2<=maxp?", ":"");
+				fprintf(fo,")\n");
+				for(j=4;j<=maxp;j+=2) fprintf(fo,"\tint %s;\n",vname(j));
+				fprintf(fo,"{\n");
 				clear_regs();
 				for(i=i+1;i<end;i++){
 					char *bp=skipws(Line[i]), *bl=labelof(Line[i]);
 					if(bp[0]=='~') continue;		/* ~~entry / ~name=off */
-					if(bl){ if(bl[0]!='_') fprintf(out,"%s:\n",bl); continue; }
+					if(bl){ if(bl[0]!='_') fprintf(fo,"%s:\n",bl); continue; }
 					if(bp[0]=='.'||bp[0]==0) continue;
-					{ struct insn ins; split_insn(Line[i],&ins); emit_insn(out,&ins); }
+					{ struct insn ins; split_insn(Line[i],&ins); emit_insn(fo,&ins); }
 				}
-				fprintf(out,"}\n\n");
+				fprintf(fo,"}\n\n");
 				i=end-1;
 				continue;
 			}
 
 			/* data: declare each `_name:' global; show the raw init words */
 			if(inseg==2 && (lab=labelof(Line[i])) && lab[0]=='_'){
-				char dname[128], init[256]=""; int k;
+				char dname[128], init[256]=""; int k; FILE *fo=stream_for(-1);
 				strcpy(dname,lab);	/* before labelof() is called again below */
 				for(k=i+1;k<NLine;k++){
 					char *d=skipws(Line[k]);
 					if(labelof(Line[k])||d[0]=='.'||d[0]==0) break;
 					if(strlen(init)+strlen(d)<240){ strcat(init,d); strcat(init," "); }
 				}
-				fprintf(out,"int %s;\t/* data: %s*/\n",dname+1,init[0]?init:"");
+				fprintf(fo,"int %s;\t/* data: %s*/\n",dname+1,init[0]?init:"");
 			}
 		}
 	}
+	if(Single) fclose(Single);
+	{ int k; for(k=0;k<NStrm;k++) fclose(Strm[k].fp); }
 }
 
 /* ------------------------------------------------------------ file driver */
@@ -521,9 +577,8 @@ int main(int argc, char **argv)
 		strncpy(outname,base,1000); dot=strrchr(outname,'.');
 		if(dot) ((char*)dot)[0]=0; strcat(outname,".c");
 	}
-	out=fopen(outname,"w"); if(!out){ perror(outname); return 1; }
-
 	if(!looks_like_cc()){
+		out=fopen(outname,"w"); if(!out){ perror(outname); return 1; }
 		fprintf(out,"/* %s: not recognized as %s-cc (c0/c1) output.\n",outname,PREFIX);
 		fprintf(out," * No `jsr r5,csv'/`jmp cret' fingerprint -- this looks like\n");
 		fprintf(out," * hand-written assembly, or Pascal/Fortran/other-compiler code.\n");
@@ -532,8 +587,7 @@ int main(int argc, char **argv)
 		fprintf(stderr,"dcc: %s -> %s (declined: not our compiler)\n",path,outname);
 		return 0;
 	}
-	decompile(out);
-	fclose(out);
+	decompile(outname);		/* writes <stem>.c, or <stem>.dec/ with `obj' map lines */
 	fprintf(stderr,"dcc: %s -> %s\n",path,outname);
 	return 0;
 }
